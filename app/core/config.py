@@ -1,0 +1,44 @@
+from pydantic_settings import BaseSettings
+from functools import lru_cache
+
+
+class Settings(BaseSettings):
+    database_url: str = "postgresql://ielts:ielts@db:5432/ielts"
+
+    openai_api_key: str
+    gemini_api_key: str
+
+    jwt_secret_key: str = ""
+
+    google_client_id: str = ""
+    google_client_secret: str = ""
+
+    brevo_api_key: str = ""
+    brevo_from_email: str = "Bandami <contacto@bandami.com>"
+
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_price_free: str = ""
+    stripe_price_premium: str = ""
+    stripe_price_credit_10: str = ""
+    stripe_price_credit_25: str = ""
+    stripe_price_exam_week: str = ""
+
+    frontend_url: str = "http://localhost:3000"
+
+    environment: str = "production"
+    debug: bool = False
+    cors_origins: list[str] = ["http://localhost:3000"]
+
+    default_free_daily_limit: int = 4
+    default_premium_daily_limit: int = 30
+    default_free_feedback_delay_hours: int = 24
+
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+
+
+@lru_cache()
+def get_settings() -> Settings:
+    return Settings()

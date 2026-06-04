@@ -26,7 +26,14 @@ logger = logging.getLogger("ielts.openai")
 class OpenAIProvider(BaseSpeakingEvaluator, WritingEvaluator, ReadingEvaluator, ListeningEvaluator):
 
     def __init__(self):
-        self.client = AsyncOpenAI(api_key=settings.openai_api_key)
+        self._client = None
+
+    def _get_client(self):
+        if self._client is None:
+            if not settings.openai_api_key:
+                raise ValueError("OpenAI API key not configured")
+            self._client = AsyncOpenAI(api_key=settings.openai_api_key)
+        return self._client
 
     @property
     def provider_name(self) -> str:
@@ -41,7 +48,7 @@ class OpenAIProvider(BaseSpeakingEvaluator, WritingEvaluator, ReadingEvaluator, 
         prompt = WRITING_PREMIUM if is_premium else WRITING_OPENAI
         max_tokens = 4096 if is_premium else 2000
 
-        response = await self.client.chat.completions.create(
+        response = await self._get_client().chat.completions.create(
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": prompt},
@@ -79,7 +86,7 @@ class OpenAIProvider(BaseSpeakingEvaluator, WritingEvaluator, ReadingEvaluator, 
         return SPEAKING_FREE, 4096
 
     async def _call_ai(self, prompt: str, transcription: str, max_tokens: int, temperature: float):
-        return await self.client.chat.completions.create(
+        return await self._get_client().chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": prompt},
@@ -109,7 +116,7 @@ class OpenAIProvider(BaseSpeakingEvaluator, WritingEvaluator, ReadingEvaluator, 
     # ---- Transcription -----------------------------------------------------
 
     async def transcribe_audio(self, audio_bytes: bytes, filename: str) -> str:
-        response = await self.client.audio.transcriptions.create(
+        response = await self._get_client().audio.transcriptions.create(
             model="whisper-1",
             file=(filename, audio_bytes, self._get_mime_type(filename)),
             language="en",
@@ -120,7 +127,7 @@ class OpenAIProvider(BaseSpeakingEvaluator, WritingEvaluator, ReadingEvaluator, 
 
     async def evaluate_reading(self, answers: dict, detailed: bool = True) -> AIEvaluationResult:
         start = time.time()
-        response = await self.client.chat.completions.create(
+        response = await self._get_client().chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": (
@@ -149,7 +156,7 @@ class OpenAIProvider(BaseSpeakingEvaluator, WritingEvaluator, ReadingEvaluator, 
 
     async def evaluate_listening(self, answers: dict, detailed: bool = True) -> AIEvaluationResult:
         start = time.time()
-        response = await self.client.chat.completions.create(
+        response = await self._get_client().chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": (

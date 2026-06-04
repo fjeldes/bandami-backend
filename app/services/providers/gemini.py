@@ -26,7 +26,14 @@ logger = logging.getLogger("ielts.gemini")
 class GeminiProvider(BaseSpeakingEvaluator, WritingEvaluator, ReadingEvaluator, ListeningEvaluator):
 
     def __init__(self):
-        self.client = genai.Client(api_key=settings.gemini_api_key)
+        self._client = None
+
+    def _get_client(self):
+        if self._client is None:
+            if not settings.gemini_api_key:
+                raise ValueError("Gemini API key not configured")
+            self._client = genai.Client(api_key=settings.gemini_api_key)
+        return self._client
 
     @property
     def provider_name(self) -> str:
@@ -44,7 +51,7 @@ class GeminiProvider(BaseSpeakingEvaluator, WritingEvaluator, ReadingEvaluator, 
         last_error = None
         for attempt in range(self.MAX_RETRIES):
             try:
-                response = self.client.models.generate_content(
+                response = self._get_client().models.generate_content(
                     model="gemini-2.5-flash",
                     contents=[
                         {"role": "user", "parts": [{"text": prompt}]},
@@ -91,7 +98,7 @@ class GeminiProvider(BaseSpeakingEvaluator, WritingEvaluator, ReadingEvaluator, 
         return SPEAKING_CONCISE, 4096
 
     async def _call_ai(self, prompt: str, transcription: str, max_tokens: int, temperature: float):
-        return self.client.models.generate_content(
+        return self._get_client().models.generate_content(
             model="gemini-2.5-flash",
             contents=[
                 {"role": "user", "parts": [{"text": prompt}]},
@@ -128,7 +135,7 @@ class GeminiProvider(BaseSpeakingEvaluator, WritingEvaluator, ReadingEvaluator, 
 
         for attempt in range(self.MAX_RETRIES):
             try:
-                response = self.client.models.generate_content(
+                response = self._get_client().models.generate_content(
                     model="gemini-2.5-flash",
                     contents=[
                         {"role": "user", "parts": [
@@ -159,7 +166,7 @@ class GeminiProvider(BaseSpeakingEvaluator, WritingEvaluator, ReadingEvaluator, 
             '"grammar_corrections": []}\nBe strict and objective.'
         )
         try:
-            response = self.client.models.generate_content(
+            response = self._get_client().models.generate_content(
                 model="gemini-2.5-flash",
                 contents=[
                     {"role": "user", "parts": [{"text": prompt}]},
@@ -196,7 +203,7 @@ class GeminiProvider(BaseSpeakingEvaluator, WritingEvaluator, ReadingEvaluator, 
             '"grammar_corrections": []}\nBe strict and objective.'
         )
         try:
-            response = self.client.models.generate_content(
+            response = self._get_client().models.generate_content(
                 model="gemini-2.5-flash",
                 contents=[
                     {"role": "user", "parts": [{"text": prompt}]},

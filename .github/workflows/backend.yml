@@ -3,17 +3,12 @@ name: Backend CI
 on:
   push:
     branches: [develop]
-    paths: ['backend/**']
   pull_request:
     branches: [develop]
-    paths: ['backend/**']
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
 
     services:
       postgres:

@@ -21,7 +21,9 @@ from app.main import app
 from app.db import deps
 from sqlalchemy import create_engine as sa_create_engine, text
 
-TEST_DATABASE_URL = "postgresql://ielts:ielts@db:5432/ielts_test"
+import os
+
+TEST_DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://ielts:ielts@db:5432/ielts_test")
 
 VIEW_SQL = """
 CREATE OR REPLACE VIEW user_dashboard_stats AS

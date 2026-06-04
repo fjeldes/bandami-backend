@@ -20,17 +20,23 @@ def _sender() -> dict:
 
 
 def _send_email(to_email: str, subject: str, html: str) -> None:
-    cfg = sib_api_v3_sdk.Configuration()
-    cfg.api_key["api-key"] = settings.brevo_api_key
+    if not settings.brevo_api_key:
+        return
 
-    api = sib_api_v3_sdk.TransactionalEmailsApi(sib_api_v3_sdk.ApiClient(cfg))
-    msg = sib_api_v3_sdk.SendSmtpEmail(
-        to=[{"email": to_email}],
-        sender=_sender(),
-        subject=subject,
-        html_content=html,
-    )
-    api.send_transac_email(msg)
+    try:
+        cfg = sib_api_v3_sdk.Configuration()
+        cfg.api_key["api-key"] = settings.brevo_api_key
+
+        api = sib_api_v3_sdk.TransactionalEmailsApi(sib_api_v3_sdk.ApiClient(cfg))
+        msg = sib_api_v3_sdk.SendSmtpEmail(
+            to=[{"email": to_email}],
+            sender=_sender(),
+            subject=subject,
+            html_content=html,
+        )
+        api.send_transac_email(msg)
+    except ApiException:
+        pass
 
 
 FRONTEND_URL = settings.frontend_url

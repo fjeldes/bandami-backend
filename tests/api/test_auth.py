@@ -180,4 +180,5 @@ class TestProtectedRoutes:
     def test_exams_with_auth(self, client, auth_headers):
         res = client.get("/api/v1/users/me/exams", headers=auth_headers)
         assert res.status_code == 200
-        assert isinstance(res.json(), list)
+        assert "exams" in res.json()
+        assert isinstance(res.json()["exams"], list)

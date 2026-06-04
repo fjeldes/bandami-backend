@@ -370,7 +370,8 @@ from urllib.parse import urlencode
 @router.get("/google/login")
 async def google_login(request: Request):
     settings = get_settings()
-    callback_url = str(request.base_url).rstrip("/") + "/api/v1/auth/google/callback"
+    host = request.headers.get("host", "")
+    callback_url = f"https://{host}/api/v1/auth/google/callback"
 
     state = uuid4().hex
     request.session["oauth_state"] = state

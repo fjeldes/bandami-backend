@@ -374,7 +374,6 @@ async def google_login(request: Request):
     callback_url = f"https://{host}/api/v1/auth/google/callback"
 
     state = uuid4().hex
-    request.session["oauth_state"] = state
 
     params = {
         "client_id": settings.google_client_id,
@@ -385,8 +384,10 @@ async def google_login(request: Request):
         "prompt": "consent",
         "state": state,
     }
-    url = f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
-    return RedirectResponse(url)
+    google_url = f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
+    response = RedirectResponse(google_url)
+    response.set_cookie("oauth_state", state, httponly=True, secure=True, samesite="lax", max_age=300)
+    return response
 
 
 @router.get("/google/callback")
@@ -400,11 +401,13 @@ async def google_callback(
 
     if not state:
         return RedirectResponse(f"{settings.frontend_url}/auth/callback?error=missing_state")
-    if request and hasattr(request, "session"):
-        expected = request.session.pop("oauth_state", None)
-        if expected != state:
-            return RedirectResponse(f"{settings.frontend_url}/auth/callback?error=invalid_state")
-    callback_url = str(request.base_url).rstrip("/") + "/api/v1/auth/google/callback"
+
+    expected = request.cookies.get("oauth_state") if request else None
+    if expected != state:
+        return RedirectResponse(f"{settings.frontend_url}/auth/callback?error=invalid_state")
+
+    host = request.headers.get("host", "") if request else ""
+    callback_url = f"https://{host}/api/v1/auth/google/callback"
 
     token_res = requests.post(GOOGLE_TOKEN_URL, data={
         "client_id": settings.google_client_id,
@@ -459,5 +462,5 @@ async def google_callback(
     _store_refresh_token(db, user_id, refresh_token)
 
     redirect = RedirectResponse(f"{settings.frontend_url}/auth/callback?access_token={access_token}", status_code=302)
-    _set_refresh_cookie(redirect, refresh_token)
+    redirect.delete_cookie("oauth_state")
     return redirect

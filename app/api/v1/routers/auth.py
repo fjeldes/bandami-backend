@@ -4,7 +4,7 @@ Uses SQLAlchemy ORM — no Supabase dependency.
 """
 
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, HTTPException, Body, Depends, BackgroundTasks, Request
+from fastapi import APIRouter, HTTPException, Body, Depends, BackgroundTasks, Request, Response, Cookie
 from pydantic import BaseModel, EmailStr, Field
 from uuid import uuid4
 import hashlib
@@ -30,6 +30,22 @@ from app.core.limiter import limiter
 from app.core.auth import _calc_plan_info
 
 router = APIRouter()
+
+
+def _set_refresh_cookie(response: Response, token: str, max_age: int = 60 * 60 * 24 * 30):
+    response.set_cookie(
+        key="refresh_token",
+        value=token,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=max_age,
+        path="/api/v1/auth",
+    )
+
+
+def _clear_refresh_cookie(response: Response):
+    response.delete_cookie(key="refresh_token", path="/api/v1/auth")
 
 
 class RegisterRequest(BaseModel):
@@ -99,11 +115,11 @@ def _revoke_user_tokens(db: Session, user_id: str) -> None:
 
 def _user_response(user: UserProfile, db: Session = None) -> dict:
     tier = user.subscription_tier or "free"
-    credits = 0
+    discounts = user.referral_discounts or 0
     if db:
         plan = _calc_plan_info(db, str(user.id))
         tier = plan["tier"]
-        credits = plan.get("credits_remaining", 0)
+        discounts = plan.get("referral_discounts", 0)
     return {
         "id": str(user.id),
         "email": user.email,
@@ -111,7 +127,7 @@ def _user_response(user: UserProfile, db: Session = None) -> dict:
         "subscription_tier": tier,
         "role": user.role or "user",
         "referral_code": user.referral_code or "",
-        "credits_remaining": credits,
+        "referral_discounts": discounts,
     }
 
 
@@ -151,16 +167,14 @@ async def register(
     db.commit()
 
     if referred_by:
-        for uid in [user_id, referred_by]:
-            db.add(UserCreditPack(
-                user_id=uid,
-                credits_total=2,
-                credits_used=0,
-                source="referral",
-                purchased_at=datetime.now(timezone.utc),
-                expires_at=datetime.now(timezone.utc) + timedelta(days=365),
-            ))
-        db.commit()
+        referrer = db.query(UserProfile).filter(UserProfile.id == referred_by).first()
+        if referrer:
+            referrer.referral_discounts = (referrer.referral_discounts or 0) + 1
+            # Also give discount to the new user who signed up with referral
+            new_user = db.query(UserProfile).filter(UserProfile.id == user_id).first()
+            if new_user:
+                new_user.referral_discounts = (new_user.referral_discounts or 0) + 1
+            db.commit()
 
     verification_token = create_verification_token(user_id)
 
@@ -203,12 +217,13 @@ async def refresh(
     body: RefreshRequest = Body(...),
     db: Session = Depends(get_db),
 ):
+    raw_token = body.refresh_token
     try:
-        payload = _decode_token(body.refresh_token)
+        payload = _decode_token(raw_token)
     except ValueError:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
-    token_hash = _hash_token(body.refresh_token)
+    token_hash = _hash_token(raw_token)
     stored = db.execute(
         select(RefreshToken).where(
             RefreshToken.token_hash == token_hash,
@@ -262,6 +277,7 @@ async def verify_email(
     access_token = create_access_token(user_id)
     refresh_token = create_refresh_token(user_id)
     _store_refresh_token(db, user_id, refresh_token)
+    _set_refresh_cookie(response, refresh_token)
 
     return AuthResponse(
         access_token=access_token,
@@ -381,9 +397,11 @@ async def google_callback(
 ):
     settings = get_settings()
 
-    if state and request and hasattr(request, "session"):
+    if not state:
+        return RedirectResponse(f"{settings.frontend_url}/auth/callback?error=missing_state")
+    if request and hasattr(request, "session"):
         expected = request.session.pop("oauth_state", None)
-        if expected and expected != state:
+        if expected != state:
             return RedirectResponse(f"{settings.frontend_url}/auth/callback?error=invalid_state")
     callback_url = str(request.base_url).rstrip("/") + "/api/v1/auth/google/callback"
 
@@ -439,5 +457,6 @@ async def google_callback(
     refresh_token = create_refresh_token(user_id)
     _store_refresh_token(db, user_id, refresh_token)
 
-    params = urlencode({"access_token": access_token, "refresh_token": refresh_token})
-    return RedirectResponse(f"{settings.frontend_url}/auth/callback?{params}")
+    redirect = RedirectResponse(f"{settings.frontend_url}/auth/callback?access_token={access_token}", status_code=302)
+    _set_refresh_cookie(redirect, refresh_token)
+    return redirect

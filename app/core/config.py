@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings
+from pydantic import model_validator
 from functools import lru_cache
 
 
@@ -9,6 +10,12 @@ class Settings(BaseSettings):
     gemini_api_key: str
 
     jwt_secret_key: str = ""
+
+    @model_validator(mode="after")
+    def validate_jwt(self):
+        if len(self.jwt_secret_key) < 32:
+            raise ValueError("JWT_SECRET_KEY must be at least 32 characters long")
+        return self
 
     google_client_id: str = ""
     google_client_secret: str = ""
@@ -23,6 +30,14 @@ class Settings(BaseSettings):
     stripe_price_credit_10: str = ""
     stripe_price_credit_25: str = ""
     stripe_price_exam_week: str = ""
+
+    paddle_api_key: str = ""
+    paddle_webhook_secret: str = ""
+    paddle_price_premium: str = ""
+    paddle_price_exam_week: str = ""
+    paddle_environment: str = "sandbox"
+
+    payment_provider: str = "stripe"
 
     frontend_url: str = "http://localhost:3000"
 

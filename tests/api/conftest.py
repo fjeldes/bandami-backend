@@ -10,7 +10,13 @@ from app.db.engine import Base
 from app.models.user import UserProfile
 from app.models.subscription import SubscriptionPlan, UserSubscription
 from app.core.security import hash_password, create_access_token
-from app.services.providers.base import AIEvaluationResult, AbstractAIProvider
+from app.services.providers.base import (
+    AIEvaluationResult,
+    WritingEvaluator,
+    SpeakingEvaluator,
+    ReadingEvaluator,
+    ListeningEvaluator,
+)
 from app.main import app
 from app.db import deps
 from sqlalchemy import create_engine as sa_create_engine, text
@@ -36,7 +42,7 @@ GROUP BY up.id, up.subscription_tier;
 """
 
 
-class MockAIProvider(AbstractAIProvider):
+class MockAIProvider(WritingEvaluator, SpeakingEvaluator, ReadingEvaluator, ListeningEvaluator):
     @property
     def provider_name(self) -> str: return "gemini"
 

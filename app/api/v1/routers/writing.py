@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.db.deps import get_db
@@ -11,7 +11,8 @@ from app.core.auth import (
     get_ai_provider,
     compute_feedback_unlocks_at,
 )
-from app.services.providers.base import AbstractAIProvider
+from app.core.limiter import limiter
+from app.services.providers.base import WritingEvaluator
 from app.core.config import get_settings
 from datetime import datetime, timezone
 import traceback
@@ -53,12 +54,14 @@ async def create_writing_exam(
 
 
 @router.post("/", response_model=EvaluationResponse)
+@limiter.limit("5/minute")
 async def evaluate_writing_endpoint(
+    request: Request,
     submission: WritingSubmission,
     user_id: str = Depends(get_current_user),
     db: Session = Depends(get_db),
     plan_info: dict = Depends(check_daily_limit),
-    provider: AbstractAIProvider = Depends(get_ai_provider),
+    provider: WritingEvaluator = Depends(get_ai_provider),
 ):
     exam = db.query(Exam).filter(
         Exam.id == str(submission.exam_id),
@@ -70,10 +73,10 @@ async def evaluate_writing_endpoint(
     if exam.status != "pending":
         raise HTTPException(status_code=400, detail="Exam already processed")
 
-    is_free = plan_info.get("is_free", True)
+    is_free = plan_info.get("tier", "free") != "premium"
     delay_hours = plan_info.get("feedback_delay_hours", 0)
     unlocks_at = compute_feedback_unlocks_at(delay_hours)
-    is_visible = delay_hours == 0
+    is_visible = plan_info.get("tier", "free") == "premium" or plan_info.get("is_admin", False)
 
     exam.status = "processing"
     exam.eval_source = plan_info.get("eval_source", "daily")
@@ -129,7 +132,7 @@ async def evaluate_writing_endpoint(
             logger.error(f"Evaluation failed:\n{tb}")
         exam.status = "failed"
         db.commit()
-        raise HTTPException(status_code=500, detail=f"Evaluation failed: {str(e)[:200]}")
+        raise HTTPException(status_code=500, detail="Evaluation failed. Please try again.")
 
 
 @router.get("/{exam_id}/evaluation", response_model=EvaluationResponse)
@@ -148,12 +151,12 @@ async def get_writing_evaluation(
         raise HTTPException(status_code=404, detail="Evaluation not found")
 
     unlocks_at = ev.feedback_unlocks_at
-    is_free = plan_info.get("is_free", True)
+    is_free = plan_info.get("tier", "free") != "premium"
 
     now = datetime.now(timezone.utc)
     if unlocks_at and unlocks_at.tzinfo is None:
         unlocks_at = unlocks_at.replace(tzinfo=timezone.utc)
-    is_visible = unlocks_at is None or unlocks_at <= now
+    is_visible = plan_info.get("tier", "free") == "premium" or plan_info.get("is_admin", False)
 
     return EvaluationResponse(
         id=str(ev.id),

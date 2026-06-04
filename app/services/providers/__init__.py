@@ -1,18 +1,19 @@
-from app.services.providers.base import AbstractAIProvider
-from app.services.providers.gemini import GeminiProvider
+# ============================================================
+# Provider factory — returns provider instance by name
+# ============================================================
+
+from app.services.providers.base import WritingEvaluator, SpeakingEvaluator, ReadingEvaluator, ListeningEvaluator
 from app.services.providers.openai import OpenAIProvider
+from app.services.providers.gemini import GeminiProvider
 
-_gemini = GeminiProvider()
-_openai = OpenAIProvider()
-
-PROVIDER_MAP: dict[str, AbstractAIProvider] = {
-    "gemini": _gemini,
-    "openai": _openai,
+_providers = {
+    "openai": OpenAIProvider(),
+    "gemini": GeminiProvider(),
 }
 
 
-def get_provider(provider_name: str) -> AbstractAIProvider:
-    provider = PROVIDER_MAP.get(provider_name)
-    if provider is None:
-        raise ValueError(f"Unknown AI provider: {provider_name}. Available: {list(PROVIDER_MAP.keys())}")
-    return provider
+def get_provider(name: str) -> OpenAIProvider | GeminiProvider:
+    """Return the provider instance for the given name."""
+    if name not in _providers:
+        raise ValueError(f"Unknown provider: {name}. Available: {list(_providers.keys())}")
+    return _providers[name]

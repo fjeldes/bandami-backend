@@ -2,22 +2,20 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 from typing import Optional
+from datetime import datetime, timezone
 
 from app.db.deps import get_db
 from app.models.exam import Exam, Evaluation
 from app.schemas.evaluation import EvaluationResponse, ExamCreate, ExamResponse
 from app.core.auth import get_current_user, get_user_plan_info, check_daily_limit, get_ai_provider, compute_feedback_unlocks_at
-from app.services.providers.base import AbstractAIProvider
-from datetime import datetime, timezone
-import logging
+from app.services.providers.base import ReadingEvaluator
 
-logger = logging.getLogger("ielts.reading")
 router = APIRouter()
 
 
 class ReadingSubmission(BaseModel):
     exam_id: str
-    answers: dict[str, str] = Field(..., description="Map of question_id -> user's answer")
+    answers: dict = Field(default_factory=dict)
 
 
 @router.post("/exam", response_model=ExamResponse)
@@ -30,7 +28,6 @@ async def create_reading_exam(
         user_id=user_id,
         question_id=str(body.question_id) if body.question_id else None,
         exam_type="reading",
-        task_type=None,
         status="pending",
         attempt_number=body.attempt_number,
     )
@@ -38,9 +35,11 @@ async def create_reading_exam(
     db.commit()
     db.refresh(exam)
     return ExamResponse(
-        id=str(exam.id), user_id=str(exam.user_id), question_id=str(exam.question_id) if exam.question_id else None,
-        exam_type=exam.exam_type, task_type=exam.task_type, status=exam.status,
-        attempt_number=exam.attempt_number, eval_source=exam.eval_source, created_at=exam.created_at,
+        id=str(exam.id), user_id=str(exam.user_id),
+        question_id=str(exam.question_id) if exam.question_id else None,
+        exam_type=exam.exam_type, task_type=exam.task_type,
+        status=exam.status, attempt_number=exam.attempt_number,
+        eval_source=exam.eval_source, created_at=exam.created_at,
     )
 
 
@@ -50,18 +49,18 @@ async def evaluate_reading(
     user_id: str = Depends(get_current_user),
     db: Session = Depends(get_db),
     plan_info: dict = Depends(check_daily_limit),
-    provider: AbstractAIProvider = Depends(get_ai_provider),
-):
+    provider: ReadingEvaluator = Depends(get_ai_provider),
+) -> EvaluationResponse:
     exam = db.query(Exam).filter(Exam.id == submission.exam_id, Exam.user_id == user_id).first()
     if not exam:
         raise HTTPException(status_code=404, detail="Exam not found")
     if exam.status != "pending":
         raise HTTPException(status_code=400, detail="Exam already processed")
 
-    is_free = plan_info.get("is_free", True)
+    is_free = plan_info.get("tier", "free") != "premium"
     delay_hours = plan_info.get("feedback_delay_hours", 0)
     unlocks_at = compute_feedback_unlocks_at(delay_hours)
-    is_visible = delay_hours == 0
+    is_visible = plan_info.get("tier", "free") == "premium" or plan_info.get("is_admin", False)
 
     exam.status = "processing"
     db.commit()
@@ -116,7 +115,7 @@ async def get_reading_evaluation(
     unlocks_at = ev.feedback_unlocks_at
     now = datetime.now(timezone.utc)
     if unlocks_at and unlocks_at.tzinfo is None: unlocks_at = unlocks_at.replace(tzinfo=timezone.utc)
-    is_visible = unlocks_at is None or unlocks_at <= now
+    is_visible = plan_info.get("tier", "free") == "premium" or plan_info.get("is_admin", False)
 
     return EvaluationResponse(
         id=str(ev.id), exam_id=str(ev.exam_id), user_submission=ev.user_submission,

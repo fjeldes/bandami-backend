@@ -60,6 +60,8 @@ async def get_user_exams(
     db: Session = Depends(get_db),
     plan_info: dict = Depends(get_user_plan_info),
 ):
+    total = db.query(Exam).filter(Exam.user_id == user_id).count()
+
     exams = (
         db.query(Exam)
         .outerjoin(Evaluation)
@@ -118,7 +120,155 @@ async def get_user_exams(
             exam_data["evaluations"].append(eval_data)
 
         results.append(exam_data)
-    return results
+    return {"exams": results, "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/me/error-patterns")
+async def get_error_patterns(
+    user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    plan_info: dict = Depends(get_user_plan_info),
+):
+    """Aggregate grammar errors into patterns (premium only)."""
+    is_premium = plan_info.get("tier", "free") == "premium" or plan_info.get("is_admin", False)
+    if not is_premium:
+        return {"patterns": [], "premium_required": True}
+
+    evals = (
+        db.query(Evaluation)
+        .join(Exam)
+        .filter(Exam.user_id == user_id, Evaluation.grammar_corrections.isnot(None))
+        .order_by(desc(Evaluation.created_at))
+        .limit(50)
+        .all()
+    )
+
+    patterns: dict[str, dict] = {}
+    for ev in evals:
+        for corr in (ev.grammar_corrections or []):
+            explanation = (corr.get("explanation") or "").lower()
+            key = _classify_error(explanation)
+            if key not in patterns:
+                patterns[key] = {"type": key, "count": 0, "examples": []}
+            patterns[key]["count"] += 1
+            if len(patterns[key]["examples"]) < 3:
+                patterns[key]["examples"].append({
+                    "original": corr.get("original", ""),
+                    "corrected": corr.get("corrected", ""),
+                })
+
+    sorted_patterns = sorted(patterns.values(), key=lambda x: x["count"], reverse=True)[:6]
+    return {"patterns": sorted_patterns}
+
+
+def _classify_error(explanation: str) -> str:
+    if any(w in explanation for w in ["subject-verb", "sva", "agreement"]): return "Subject-Verb Agreement"
+    if any(w in explanation for w in ["tense", "past tense", "present tense", "future"]): return "Verb Tense"
+    if any(w in explanation for w in ["article", "a/an", "definite", "indefinite"]): return "Articles"
+    if any(w in explanation for w in ["preposition", "in/on/at"]): return "Prepositions"
+    if any(w in explanation for w in ["plural", "singular", "countable"]): return "Singular/Plural"
+    if any(w in explanation for w in ["word order", "sentence structure", "syntax"]): return "Word Order"
+    if any(w in explanation for w in ["pronoun", "reference"]): return "Pronouns"
+    if any(w in explanation for w in ["modal", "auxiliary", "helping verb"]): return "Modal/Auxiliary Verbs"
+    if any(w in explanation for w in ["conditional", "if clause"]): return "Conditionals"
+    if any(w in explanation for w in ["passive", "active", "voice"]): return "Passive/Active Voice"
+    return "Other Grammar"
+
+
+@router.post("/me/study-plan")
+async def generate_study_plan(
+    user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    plan_info: dict = Depends(get_user_plan_info),
+):
+    """Generate a personalized 7-day study plan based on recent performance (premium only)."""
+    is_premium = plan_info.get("tier", "free") == "premium" or plan_info.get("is_admin", False)
+    if not is_premium:
+        raise HTTPException(status_code=402, detail="Study plan is a Premium feature")
+
+    from app.services.providers import get_provider
+
+    recent = (
+        db.query(Evaluation)
+        .join(Exam)
+        .filter(Exam.user_id == user_id, Evaluation.overall_band.isnot(None))
+        .order_by(desc(Evaluation.created_at))
+        .limit(10)
+        .all()
+    )
+
+    if not recent:
+        return {"plan": [], "message": "Complete at least one exam to generate a study plan."}
+
+    # Build summary
+    exam_summaries = []
+    for ev in recent:
+        exam = ev.exam
+        criteria_summary = ", ".join(
+            [f"{k.replace('_', ' ')}: {v['score']}" for k, v in (ev.criteria_scores or {}).items() if isinstance(v, dict) and 'score' in v][:4]
+        )
+        exam_summaries.append(
+            f"{exam.exam_type.title()} — Band {ev.overall_band} — {criteria_summary}"
+        )
+
+    weak_areas = []
+    if recent:
+        all_criteria: dict[str, list[float]] = {}
+        for ev2 in recent:
+            for k, v in (ev2.criteria_scores or {}).items():
+                if isinstance(v, dict) and 'score' in v:
+                    all_criteria.setdefault(k, []).append(v['score'])
+        for k, scores in all_criteria.items():
+            avg = sum(scores) / len(scores)
+            if avg < 6.5:
+                weak_areas.append(f"{k.replace('_', ' ')} (avg {avg:.1f})")
+
+    prompt = (
+        "You are an IELTS study coach. Based on the student's recent performance, create a concise 7-day study plan.\n\n"
+        f"Recent exams:\n" + "\n".join(exam_summaries[-5:]) + "\n\n"
+        f"Weak areas: {', '.join(weak_areas) if weak_areas else 'None identified yet'}\n\n"
+        "Return ONLY valid JSON. Give 5-7 specific daily tasks (each with day number, focus area, and 1-2 sentence instruction).\n"
+        '{"plan": [{"day": 1, "focus": "Writing Task 2 Structure", "task": "..."}, ...], "message": "..."}'
+    )
+
+    try:
+        provider = get_provider("gemini")
+        ai_result = await provider.evaluate_speaking("", detailed=False)
+        # Use the AI to generate the plan — simple approach: call gemini directly
+        import google.genai as genai_import
+        from app.core.config import get_settings
+        s = get_settings()
+        client = genai_import.Client(api_key=s.gemini_api_key)
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=[{"role": "user", "parts": [{"text": prompt}]}],
+            config={"temperature": 0.7, "max_output_tokens": 2048, "response_mime_type": "application/json"},
+        )
+        import json
+        data = json.loads(response.text.strip().removeprefix("```json").removesuffix("```").strip())
+        return data
+    except Exception as e:
+        # Fallback: hardcoded plan from weak areas
+        if not weak_areas:
+            return {"plan": [
+                {"day": 1, "focus": "Writing Task 2", "task": "Write a full Task 2 essay under timed conditions (40 min)."},
+                {"day": 2, "focus": "Speaking Part 2", "task": "Record a 2-minute long turn on an unfamiliar topic. Review your fluency."},
+                {"day": 3, "focus": "Grammar Review", "task": "Review common grammatical errors in your recent exams. Write 10 corrected sentences."},
+                {"day": 4, "focus": "Vocabulary Building", "task": "Learn 15 new academic words and use each in a sentence related to common IELTS topics."},
+                {"day": 5, "focus": "Writing Task 1", "task": "Describe a graph/chart in 150 words (20 min). Focus on accurate data description."},
+                {"day": 6, "focus": "Speaking Part 3", "task": "Practice abstract discussion questions. Record 3-minute answers on education and technology topics."},
+                {"day": 7, "focus": "Full Practice", "task": "Complete one full Writing Task 2 + Speaking Part 1 practice. Review all feedback from this week."},
+            ], "message": "Plan generated from your weak areas. Keep practicing!"}
+        focus = weak_areas[0].split(" ")[0] if weak_areas else "Grammar"
+        return {"plan": [
+            {"day": 1, "focus": f"Improve {focus}", "task": f"Practice {focus.lower()} with targeted exercises. Focus on accuracy first, then speed."},
+            {"day": 2, "focus": "Vocabulary", "task": "Learn 10 new words related to common IELTS topics. Use them in speaking practice."},
+            {"day": 3, "focus": "Writing Task 2", "task": "Write a full essay in 40 minutes. Self-correct grammar errors before submitting."},
+            {"day": 4, "focus": "Speaking Part 2", "task": "Record yourself speaking for 2 minutes on a random topic. Listen back and note improvements."},
+            {"day": 5, "focus": "Grammar Review", "task": "Review your most common errors. Write 10 sentences practicing the correct forms."},
+            {"day": 6, "focus": "Full Practice", "task": "Do one Writing + one Speaking evaluation. Compare scores to your target."},
+            {"day": 7, "focus": "Rest & Review", "task": "Review all feedback from this week. Note your biggest improvement and set goals for next week."},
+        ], "message": f"Focus on improving your {focus.lower()} this week."}
 
 
 @router.get("/me/credit-packs", response_model=list[UserCreditPackResponse])
@@ -288,16 +438,11 @@ async def get_referral(
         db.commit()
 
     referrals = db.query(UserProfile).filter(UserProfile.referred_by == user_id).count()
-    packs = db.query(UserCreditPack).filter(UserCreditPack.user_id == user_id, UserCreditPack.source == "referral").all()
-    earned = sum(p.credits_total for p in packs)
-    used = sum(p.credits_used for p in packs)
     return {
         "referral_code": user.referral_code,
         "referral_count": referrals,
         "referral_url": f"/register?ref={user.referral_code}",
-        "credits_earned": earned,
-        "credits_used": used,
-        "credits_remaining": earned - used,
+        "referral_discounts": user.referral_discounts or 0,
     }
 
 
@@ -322,7 +467,6 @@ async def apply_referral(
         raise HTTPException(status_code=400, detail="Invalid referral code")
 
     user.referred_by = str(referrer.id)
-    for uid in [user_id, str(referrer.id)]:
-        db.add(UserCreditPack(user_id=uid, credits_total=2, credits_used=0, source="referral", purchased_at=datetime.now(timezone.utc), expires_at=datetime.now(timezone.utc) + timedelta(days=365)))
+    referrer.referral_discounts = (referrer.referral_discounts or 0) + 1
     db.commit()
-    return {"status": "ok", "message": "Referral applied! +2 credits earned."}
+    return {"status": "ok", "message": "Referral applied! 50% off on your next Week Pass."}

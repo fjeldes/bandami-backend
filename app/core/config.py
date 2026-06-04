@@ -6,8 +6,8 @@ from functools import lru_cache
 class Settings(BaseSettings):
     database_url: str = "postgresql://ielts:ielts@db:5432/ielts"
 
-    openai_api_key: str
-    gemini_api_key: str
+    openai_api_key: str = ""
+    gemini_api_key: str = ""
 
     jwt_secret_key: str = ""
 

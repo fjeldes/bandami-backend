@@ -47,5 +47,4 @@ Thumbs.db
 app/alembic/versions/*
 !app/alembic/versions/.gitkeep
 
-# Static (generated)
-app/static/*.html
+# Static (generated) — now tracked

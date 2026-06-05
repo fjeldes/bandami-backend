@@ -14,7 +14,7 @@ from app.core.auth import (
     compute_feedback_unlocks_at,
 )
 from app.core.limiter import limiter
-from app.services.providers.base import SpeakingEvaluator
+from app.services.providers.base import SpeakingEvaluator, SPEAKING_CRITERIA_KEYS
 from app.core.config import get_settings
 from datetime import datetime, timezone
 import traceback
@@ -22,6 +22,13 @@ import logging
 
 logger = logging.getLogger("ielts.speaking")
 router = APIRouter()
+
+
+def _filter_speaking_criteria(criteria: dict, is_visible: bool) -> dict:
+    """Free tier: return main 4 criteria scores only. Premium: all criteria."""
+    if is_visible:
+        return criteria
+    return {k: v for k, v in criteria.items() if k in SPEAKING_CRITERIA_KEYS}
 
 
 @router.post("/exam", response_model=ExamResponse)
@@ -152,7 +159,7 @@ async def evaluate_speaking_endpoint(
             exam_id=str(ev.exam_id),
             user_submission=transcription,
             overall_band=ev.overall_band,
-            criteria_scores=ev.criteria_scores if is_visible else {},
+            criteria_scores=_filter_speaking_criteria(ev.criteria_scores, is_visible),
             general_feedback=result.general_feedback or "",
             detailed_feedback=result.detailed_feedback if is_visible else None,
             grammar_corrections=result.grammar_corrections if is_visible else [],

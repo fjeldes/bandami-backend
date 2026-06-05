@@ -11,6 +11,10 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger("ielts.providers.base")
 
+
+class ProviderUnavailableError(Exception):
+    """Raised when the AI provider is unavailable after exhausting all retries."""
+
 SPEAKING_CRITERIA_KEYS = [
     "fluency_and_coherence",
     "lexical_resource",
@@ -169,7 +173,7 @@ class BaseSpeakingEvaluator(SpeakingEvaluator):
                 criteria[key] = fallback[key]
 
         if not result:
-            raise Exception(f"{self.provider_name} speaking evaluation failed after all retries")
+            raise ProviderUnavailableError(f"{self.provider_name} speaking evaluation failed after all retries")
 
         return self._build_result(result, criteria, transcription, response)
 

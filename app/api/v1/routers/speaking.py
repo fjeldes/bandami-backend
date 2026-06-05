@@ -14,7 +14,7 @@ from app.core.auth import (
     compute_feedback_unlocks_at,
 )
 from app.core.limiter import limiter
-from app.services.providers.base import SpeakingEvaluator, SPEAKING_CRITERIA_KEYS
+from app.services.providers.base import SpeakingEvaluator, SPEAKING_CRITERIA_KEYS, ProviderUnavailableError
 from app.core.config import get_settings
 from datetime import datetime, timezone
 import traceback
@@ -172,6 +172,14 @@ async def evaluate_speaking_endpoint(
             created_at=ev.created_at,
         )
 
+    except ProviderUnavailableError as e:
+        logger.warning(f"Provider unavailable: {e}")
+        exam.status = "pending"
+        db.commit()
+        raise HTTPException(
+            status_code=503,
+            detail="Our AI agent is currently experiencing high demand. Please try again later.",
+        )
     except Exception as e:
         settings = get_settings()
         tb = traceback.format_exc()

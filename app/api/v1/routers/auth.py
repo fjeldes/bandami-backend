@@ -462,5 +462,6 @@ async def google_callback(
     _store_refresh_token(db, user_id, refresh_token)
 
     redirect = RedirectResponse(f"{settings.frontend_url}/auth/callback?access_token={access_token}", status_code=302)
+    _set_refresh_cookie(redirect, refresh_token)
     redirect.delete_cookie("oauth_state")
     return redirect

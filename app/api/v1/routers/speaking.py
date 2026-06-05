@@ -25,10 +25,14 @@ router = APIRouter()
 
 
 def _filter_speaking_criteria(criteria: dict, is_visible: bool) -> dict:
-    """Free tier: return main 4 criteria scores only. Premium: all criteria."""
+    """Free tier: return main 4 criteria scores only (no comment). Premium: all criteria + comments."""
     if is_visible:
         return criteria
-    return {k: v for k, v in criteria.items() if k in SPEAKING_CRITERIA_KEYS}
+    return {
+        k: {"score": v["score"]}
+        for k, v in criteria.items()
+        if k in SPEAKING_CRITERIA_KEYS and isinstance(v, dict) and "score" in v
+    }
 
 
 @router.post("/exam", response_model=ExamResponse)

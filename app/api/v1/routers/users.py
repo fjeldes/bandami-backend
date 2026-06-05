@@ -363,6 +363,7 @@ async def get_questions(
     exam_type: str = None,
     task_type: str = None,
     difficulty: int = None,
+    user_id: str = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     from app.models.exam import Question

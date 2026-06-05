@@ -98,7 +98,7 @@ async def check_daily_limit(
     from app.core.config import get_settings
     settings = get_settings()
 
-    if settings.environment == "development" or user_plan.get("is_admin"):
+    if user_plan.get("is_admin"):
         user_plan["eval_source"] = "daily"
         user_plan["daily_used"] = 0
         return user_plan

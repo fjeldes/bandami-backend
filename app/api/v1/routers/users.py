@@ -35,8 +35,7 @@ async def get_user_stats(
         raise HTTPException(status_code=404, detail="User stats not found")
 
     data = dict(row._mapping)
-    settings = get_settings()
-    is_unlimited = plan_info.get("is_admin", False) or settings.environment == "development"
+    is_unlimited = plan_info.get("is_admin", False)
     limit = plan_info.get("daily_eval_limit", 4)
     used = data.get("daily_evals_used", 0)
 

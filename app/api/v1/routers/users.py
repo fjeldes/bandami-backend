@@ -102,10 +102,13 @@ async def get_user_exams(
         }
 
         if ev:
+            def _strip_criteria_feedback(criteria: dict) -> dict:
+                return {k: {"score": v["score"]} for k, v in (criteria or {}).items() if isinstance(v, dict) and "score" in v}
+
             eval_data = {
                 "id": str(ev.id),
                 "overall_band": ev.overall_band,
-                "criteria_scores": ev.criteria_scores if (is_visible or is_admin) else {},
+                "criteria_scores": _strip_criteria_feedback(ev.criteria_scores) if not (is_visible or is_admin) else ev.criteria_scores,
                 "general_feedback": ev.general_feedback or "",
                 "detailed_feedback": ev.detailed_feedback if (is_visible or is_admin) else None,
                 "grammar_corrections": ev.grammar_corrections if (is_visible or is_admin) else [],

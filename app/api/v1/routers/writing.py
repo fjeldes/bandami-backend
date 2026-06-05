@@ -170,7 +170,7 @@ async def get_writing_evaluation(
         exam_id=str(ev.exam_id),
         user_submission=ev.user_submission,
         overall_band=ev.overall_band,
-        criteria_scores=ev.criteria_scores if is_visible else {},
+        criteria_scores=_filter_writing_criteria(ev.criteria_scores, is_visible),
         general_feedback=ev.general_feedback or "",
         detailed_feedback=ev.detailed_feedback if is_visible else None,
         grammar_corrections=ev.grammar_corrections if is_visible else [],

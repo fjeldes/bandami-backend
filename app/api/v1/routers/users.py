@@ -6,6 +6,7 @@ from datetime import datetime, timezone, timedelta
 
 from app.db.deps import get_db
 from app.core.auth import get_current_user, get_user_plan_info
+from app.core.config import get_settings
 from app.core.security import hash_password, verify_password
 from app.models.user import UserProfile
 from app.models.exam import Exam, Evaluation
@@ -34,14 +35,16 @@ async def get_user_stats(
         raise HTTPException(status_code=404, detail="User stats not found")
 
     data = dict(row._mapping)
+    settings = get_settings()
+    is_unlimited = plan_info.get("is_admin", False) or settings.environment == "development"
     limit = plan_info.get("daily_eval_limit", 4)
     used = data.get("daily_evals_used", 0)
 
     return DashboardStats(
         subscription_tier=data.get("subscription_tier", "free"),
-        daily_eval_limit=limit,
-        daily_evals_used=used,
-        daily_evals_remaining=max(0, limit - used),
+        daily_eval_limit=-1 if is_unlimited else limit,
+        daily_evals_used=0,
+        daily_evals_remaining=-1 if is_unlimited else max(0, limit - used),
         total_exams=data.get("total_exams", 0),
         average_band=data.get("average_band"),
         highest_band=data.get("highest_band"),

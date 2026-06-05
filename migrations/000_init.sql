@@ -288,7 +288,7 @@ SELECT
     COALESCE(sp.daily_eval_limit, 4) AS daily_eval_limit,
     (
         SELECT COUNT(*) FROM exams
-        WHERE user_id = up.id AND created_at::date = CURRENT_DATE AND eval_source = 'daily'
+        WHERE user_id = up.id AND created_at::date = CURRENT_DATE AND eval_source = 'daily' AND status NOT IN ('pending', 'failed')
     ) AS daily_evals_used,
     (
         SELECT COUNT(*) FROM exams WHERE user_id = up.id

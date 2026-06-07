@@ -3,10 +3,13 @@
 # ============================================================
 
 import json
+import logging
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 
 from sqlalchemy.orm import Session as DbSession
+
+logger = logging.getLogger(__name__)
 
 from app.core.config import get_settings
 from app.services.payments.base import PaymentProvider, SubscriptionInfo
@@ -63,9 +66,6 @@ class StripeProvider(PaymentProvider):
                 "trial_period_days": 7,
                 "metadata": {"user_id": user_id, "plan_slug": plan_slug},
             }
-            config["custom_text"] = {
-                "submit": {"message": "You'll be charged $2.99 today for the first week. Then $14.99/month after 7 days. Cancel anytime."}
-            }
 
         if discount_percent > 0:
             coupon = stripe.Coupon.create(
@@ -74,8 +74,12 @@ class StripeProvider(PaymentProvider):
             )
             config["discounts"] = [{"coupon": coupon.id}]
 
-        session = stripe.checkout.Session.create(**config)
-        return {"url": session.url}
+        try:
+            session = stripe.checkout.Session.create(**config)
+            return {"url": session.url}
+        except Exception as e:
+            logger.exception("Stripe Checkout creation failed for plan=%s user=%s", plan_slug, user_id)
+            raise
 
     # -- webhook --------------------------------------------------------------
 

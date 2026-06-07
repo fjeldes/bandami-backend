@@ -2,9 +2,12 @@
 Payment router — delegates to the configured PaymentProvider (Stripe, Paddle, etc.).
 """
 
+import logging
 from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from app.db.deps import get_db
 from app.core.auth import get_current_user
@@ -61,6 +64,7 @@ async def create_checkout(
         )
         return result
     except Exception as e:
+        logger.exception("Checkout creation failed for plan=%s", body.plan_slug)
         raise HTTPException(status_code=500, detail="Checkout creation failed. Please try again.")
 
 

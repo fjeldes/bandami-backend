@@ -141,7 +141,7 @@ async def verify_checkout_session(
         return {"status": "skipped"}
 
     now = datetime.now(timezone.utc)
-    days = 30 if plan_slug == "premium" else 7
+    days = 7
     db.add(UserSubscription(
         id=str(uuid4()), user_id=user_id, plan_id=str(plan.id),
         status="active", current_period_start=now, current_period_end=now + timedelta(days=days),

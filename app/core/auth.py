@@ -76,7 +76,7 @@ def _calc_plan_info(db: Session, user_id: str) -> dict:
     return {
         "tier": "free",
         "provider": "gemini",
-        "daily_eval_limit": 4,
+        "daily_eval_limit": 3,
         "feedback_delay_hours": 0,
         "referral_discounts": user.referral_discounts if user else 0,
         "is_admin": False,

@@ -316,8 +316,8 @@ GROUP BY up.id, up.subscription_tier, sp.daily_eval_limit;
 -- ============================================================
 INSERT INTO subscription_plans (slug, name, description, price_cents, interval, daily_eval_limit, provider, feedback_delay_hours, sort_order)
 VALUES
-    ('free', 'Free', '4 daily evaluations with basic AI. Full feedback within 24h.', 0, 'month', 4, 'gemini', 24, 1),
-    ('exam_week_pass', 'Exam Week Pass', '7-day full access with advanced AI. Perfect if your exam is this week.', 499, 'one_time', 30, 'openai', 0, 5),
+    ('free', 'Free', '3 daily evaluations with basic AI. Speaking Part 1 only. Instant score.', 0, 'month', 3, 'gemini', 0, 1),
+    ('exam_week_pass', 'Exam Week Pass', '7-day access with advanced AI. 10 evaluations/day. Includes all modules.', 299, 'one_time', 10, 'openai', 0, 5),
     ('premium', 'Premium', '30 daily evaluations with advanced AI. Instant feedback. History & progress tracking.', 1499, 'month', 30, 'openai', 0, 10),
     ('credit_pack_10', 'Pack 10 Credits', '10 extra evaluations with no daily limit. Advanced AI.', 799, 'one_time', 0, 'openai', 0, 20),
     ('credit_pack_25', 'Pack 25 Credits', '25 extra evaluations with no daily limit. Advanced AI. Best value.', 1499, 'one_time', 0, 'openai', 0, 21)

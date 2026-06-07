@@ -367,9 +367,21 @@ async def get_questions(
     difficulty: int = None,
     user_id: str = Depends(get_current_user),
     db: Session = Depends(get_db),
+    plan_info: dict = Depends(get_user_plan_info),
 ):
     from app.models.exam import Question
     query = db.query(Question).filter(Question.is_active == True)
+
+    # Free users: only access Speaking Part 1
+    if plan_info.get("tier") == "free" and not plan_info.get("is_admin"):
+        if exam_type == "speaking":
+            query = query.filter(Question.module == "part1")
+        elif exam_type is None:
+            # If no exam_type filter, restrict speaking questions
+            query = query.filter(
+                (Question.exam_type != "speaking") |
+                ((Question.exam_type == "speaking") & (Question.module == "part1"))
+            )
 
     if exam_type:
         query = query.filter(Question.exam_type == exam_type)

@@ -162,7 +162,7 @@ class StripeProvider(PaymentProvider):
                 current_period_end=sub.current_period_end.isoformat(),
                 plan_name=plan.name if plan else "Week Pass",
                 plan_slug=plan.slug if plan else "exam_week_pass",
-                plan_amount=4.99, plan_interval="week",
+                plan_amount=2.99, plan_interval="week",
             )
 
         try:

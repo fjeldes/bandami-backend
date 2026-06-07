@@ -37,9 +37,14 @@ class Settings(BaseSettings):
     paddle_price_exam_week: str = ""
     paddle_environment: str = "sandbox"
 
+    flow_api_key: str = ""
+    flow_secret_key: str = ""
+    flow_environment: str = "sandbox"
+
     payment_provider: str = "stripe"
 
     frontend_url: str = "http://localhost:3000"
+    backend_url: str = "http://localhost:8000"
 
     environment: str = "production"
     debug: bool = False

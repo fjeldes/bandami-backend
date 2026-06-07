@@ -6,6 +6,7 @@ from app.core.config import get_settings
 from app.services.payments.base import PaymentProvider
 from app.services.payments.stripe_provider import StripeProvider
 from app.services.payments.paddle_provider import PaddleProvider
+from app.services.payments.flow_provider import FlowProvider
 
 _providers: dict[str, PaymentProvider] = {}
 
@@ -18,6 +19,7 @@ def _get_providers() -> dict[str, PaymentProvider]:
     _providers = {
         "stripe": StripeProvider(),
         "paddle": PaddleProvider(),
+        "flow": FlowProvider(),
     }
     return _providers
 

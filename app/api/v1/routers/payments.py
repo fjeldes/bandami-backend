@@ -75,9 +75,13 @@ async def payment_webhook(
 ):
     provider = _get_provider()
     payload = await request.body()
-    signature = request.headers.get(
-        "stripe-signature" if provider.provider_name == "stripe" else "paddle-signature", ""
-    )
+
+    if provider.provider_name == "flow":
+        signature = ""
+    else:
+        signature = request.headers.get(
+            "stripe-signature" if provider.provider_name == "stripe" else "paddle-signature", ""
+        )
 
     try:
         event = await provider.handle_webhook(payload, signature)

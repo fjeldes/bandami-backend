@@ -58,6 +58,15 @@ class StripeProvider(PaymentProvider):
             "allow_promotion_codes": True,
         }
 
+        if plan_slug == "premium":
+            config["subscription_data"] = {
+                "trial_period_days": 7,
+                "metadata": {"user_id": user_id, "plan_slug": plan_slug},
+            }
+            config["custom_text"] = {
+                "submit": {"message": "You'll be charged $2.99 today for the first week. Then $14.99/month after 7 days. Cancel anytime."}
+            }
+
         if discount_percent > 0:
             coupon = stripe.Coupon.create(
                 percent_off=discount_percent, duration="once", max_redemptions=1,
@@ -325,9 +334,10 @@ def _handle_checkout_completed(data, db, UserProfile, UserSubscription, Subscrip
         return {"status": "skipped"}
 
     now = datetime.now(timezone.utc)
-    days = 30 if plan_slug == "premium" else 7
+    days = 7 if plan_slug == "premium" else 7  # Both plans: 7-day period
     subscription_id = data.get("subscription")
 
+    # If premium mode and subscription exists, it's a subscription with trial
     db.add(UserSubscription(
         id=str(uuid4()), user_id=user_id, plan_id=str(plan.id),
         status="active", current_period_start=now, current_period_end=now + timedelta(days=days),
@@ -335,6 +345,35 @@ def _handle_checkout_completed(data, db, UserProfile, UserSubscription, Subscrip
     ))
     db.query(UserProfile).filter(UserProfile.id == user_id).update({"subscription_tier": "premium"})
     db.commit()
+
+    # For Premium (subscription with trial), charge $2.99 setup fee immediately
+    if plan_slug == "premium" and customer_id and subscription_id:
+        import stripe
+        s = get_settings()
+        stripe.api_key = s.stripe_secret_key
+
+        # Use the subscription's default payment method
+        try:
+            stripe_sub = stripe.Subscription.retrieve(subscription_id)
+            default_pm = stripe_sub.get("default_payment_method")
+
+            stripe.InvoiceItem.create(
+                customer=customer_id,
+                amount=299,
+                currency="usd",
+                description="First week of Premium",
+            )
+            invoice_kwargs = {
+                "customer": customer_id,
+                "auto_advance": True,
+                "collection_method": "charge_automatically",
+            }
+            if default_pm:
+                invoice_kwargs["default_payment_method"] = default_pm
+            stripe.Invoice.create(**invoice_kwargs)
+        except Exception:
+            pass  # Non-critical: setup fee fails, user still gets week access
+
     return {"status": "ok"}
 
 

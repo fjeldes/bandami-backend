@@ -2,19 +2,16 @@
 -- Migration 001: Update plan pricing & limits
 -- ============================================================
 -- Free: 3 eval/day, instant feedback (delay 0h)
--- Exam Week Pass: $2.99, 10 eval/day
+-- Exam Week Pass: deactivated (Premium now uses subscription with $2.99 first week)
 -- ============================================================
 
 UPDATE subscription_plans
 SET
     daily_eval_limit = 3,
     feedback_delay_hours = 0,
-    description = '3 daily evaluations with basic AI. Speaking Part 1 only. Instant score.'
+    description = '3 daily evaluations with basic AI. Speaking Part 1 + Writing all. Instant score.'
 WHERE slug = 'free';
 
 UPDATE subscription_plans
-SET
-    price_cents = 299,
-    daily_eval_limit = 10,
-    description = '7-day access with advanced AI. 10 evaluations/day. Includes all modules.'
+SET is_active = FALSE
 WHERE slug = 'exam_week_pass';

@@ -57,10 +57,10 @@ substitutions:
   _REPOSITORY: dev-backend
   _FRONTEND_URL: https://dev.bandami.com
   _BREVO_FROM_EMAIL: Bandami Dev <contacto@bandami.com>
-  _STRIPE_PRICE_PREMIUM: price_xxx
-  _STRIPE_PRICE_EXAM_WEEK: price_xxx
-  _STRIPE_PRICE_CREDIT_10: price_xxx
-  _STRIPE_PRICE_CREDIT_25: price_xxx
+  _STRIPE_PRICE_PREMIUM: price_1TcEkY2MYQmFD3HbJ6ZXTEHR
+  _STRIPE_PRICE_EXAM_WEEK: price_1TcEka2MYQmFD3Hb5ZFmaPyI
+  _STRIPE_PRICE_CREDIT_10: price_1TcEkZ2MYQmFD3Hb3NzxBk3r
+  _STRIPE_PRICE_CREDIT_25: price_1TcEkZ2MYQmFD3Hb8QMECGFI
 
 options:
   defaultLogsBucketBehavior: REGIONAL_USER_OWNED_BUCKET

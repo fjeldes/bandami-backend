@@ -67,15 +67,15 @@ class StripeProvider(PaymentProvider):
             config["subscription_data"] = {
                 "trial_period_days": 7,
                 "metadata": {"user_id": user_id, "plan_slug": plan_slug},
-                "add_invoice_items": [{
-                    "price_data": {
-                        "currency": "usd",
-                        "product": premium_price.product,
-                        "unit_amount": 299,
-                    },
-                    "quantity": 1,
-                }],
             }
+            config["add_invoice_items"] = [{
+                "price_data": {
+                    "currency": "usd",
+                    "product": premium_price.product,
+                    "unit_amount": 299,
+                },
+                "quantity": 1,
+            }]
 
         if discount_percent > 0:
             coupon = stripe.Coupon.create(

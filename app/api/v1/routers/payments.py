@@ -142,12 +142,34 @@ async def verify_checkout_session(
 
     now = datetime.now(timezone.utc)
     days = 7
-    db.add(UserSubscription(
+
+    us = UserSubscription(
         id=str(uuid4()), user_id=user_id, plan_id=str(plan.id),
         status="active", current_period_start=now, current_period_end=now + timedelta(days=days),
-        stripe_subscription_id=session.subscription, stripe_session_id=session_id,
-    ))
+        stripe_session_id=session_id,
+    )
+    db.add(us)
     db.query(UserProfile).filter(UserProfile.id == user_id).update({"subscription_tier": "premium"})
+
+    # For Premium (payment mode): create $14.99/month subscription with 7-day trial
+    if plan_slug == "premium" and session.customer:
+        try:
+            pi = stripe.PaymentIntent.retrieve(session.payment_intent)
+            pm = pi.payment_method
+
+            trial_end = int((now + timedelta(days=7)).timestamp())
+            stripe_sub = stripe.Subscription.create(
+                customer=session.customer,
+                items=[{"price": s.stripe_price_premium}],
+                trial_end=trial_end,
+                default_payment_method=pm,
+                off_session=True,
+                metadata={"user_id": user_id, "plan_slug": "premium"},
+            )
+            us.stripe_subscription_id = stripe_sub.id
+        except Exception:
+            logger.exception("Failed to create Stripe subscription for premium user=%s", user_id)
+
     db.commit()
     return {"status": "ok"}
 

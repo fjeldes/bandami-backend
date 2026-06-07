@@ -49,12 +49,17 @@ class StripeProvider(PaymentProvider):
     ) -> dict:
         stripe = self._stripe()
         s = get_settings()
-        price_id = self._price_id(plan_slug)
-        mode = "subscription" if plan_slug == "premium" else "payment"
+
+        # Premium uses payment mode with $2.99 exam_week price;
+        # the $14.99/month subscription is created in the webhook.
+        if plan_slug == "premium":
+            price_id = s.stripe_price_exam_week
+        else:
+            price_id = self._price_id(plan_slug)
 
         config: dict = {
             "customer_email": user_email,
-            "mode": mode,
+            "mode": "payment",
             "metadata": {"user_id": user_id, "plan_slug": plan_slug},
             "line_items": [{"price": price_id, "quantity": 1}],
             "success_url": success_url + "&session_id={CHECKOUT_SESSION_ID}",
@@ -63,19 +68,9 @@ class StripeProvider(PaymentProvider):
         }
 
         if plan_slug == "premium":
-            premium_price = stripe.Price.retrieve(s.stripe_price_premium)
-            config["subscription_data"] = {
-                "trial_period_days": 7,
-                "metadata": {"user_id": user_id, "plan_slug": plan_slug},
+            config["payment_intent_data"] = {
+                "setup_future_usage": "off_session",
             }
-            config["add_invoice_items"] = [{
-                "price_data": {
-                    "currency": "usd",
-                    "product": premium_price.product,
-                    "unit_amount": 299,
-                },
-                "quantity": 1,
-            }]
 
         if discount_percent > 0:
             coupon = stripe.Coupon.create(
@@ -348,20 +343,39 @@ def _handle_checkout_completed(data, db, UserProfile, UserSubscription, Subscrip
         return {"status": "skipped"}
 
     now = datetime.now(timezone.utc)
-    days = 7 if plan_slug == "premium" else 7  # Both plans: 7-day period
-    subscription_id = data.get("subscription")
 
-    # If premium mode and subscription exists, it's a subscription with trial
-    db.add(UserSubscription(
+    us = UserSubscription(
         id=str(uuid4()), user_id=user_id, plan_id=str(plan.id),
-        status="active", current_period_start=now, current_period_end=now + timedelta(days=days),
-        stripe_subscription_id=subscription_id, stripe_session_id=session_id,
-    ))
+        status="active", current_period_start=now, current_period_end=now + timedelta(days=7),
+        stripe_session_id=session_id,
+    )
+    db.add(us)
     db.query(UserProfile).filter(UserProfile.id == user_id).update({"subscription_tier": "premium"})
+
+    if plan_slug == "premium" and customer_id:
+        try:
+            import stripe as _stripe
+            s = get_settings()
+            _stripe.api_key = s.stripe_secret_key
+
+            checkout = _stripe.checkout.Session.retrieve(session_id)
+            pi = _stripe.PaymentIntent.retrieve(checkout.payment_intent)
+            pm = pi.payment_method
+
+            trial_end = int((now + timedelta(days=7)).timestamp())
+            stripe_sub = _stripe.Subscription.create(
+                customer=customer_id,
+                items=[{"price": s.stripe_price_premium}],
+                trial_end=trial_end,
+                default_payment_method=pm,
+                off_session=True,
+                metadata={"user_id": user_id, "plan_slug": "premium"},
+            )
+            us.stripe_subscription_id = stripe_sub.id
+        except Exception:
+            logger.exception("Failed to create Stripe subscription for premium user=%s", user_id)
+
     db.commit()
-
-    # Premium: $2.99 is already charged by Stripe via add_invoice_items in the checkout
-
     return {"status": "ok"}
 
 

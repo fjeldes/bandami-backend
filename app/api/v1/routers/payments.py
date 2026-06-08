@@ -136,6 +136,31 @@ async def flow_card_callback(
     return RedirectResponse(url=cancel_url, status_code=303)
 
 
+@router.post("/flow/card-update-callback")
+async def flow_card_update_callback(
+    request: Request,
+    user_id: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    provider = _get_provider()
+    if provider.provider_name != "flow":
+        return HTMLResponse(content="Invalid provider", status_code=400)
+
+    form = await request.form()
+    token = form.get("token", "")
+    if not token:
+        return RedirectResponse(url=f"{get_settings().frontend_url}/settings", status_code=303)
+
+    try:
+        status = await provider._get_register_status(token)
+        if status.get("status") == "1":
+            logger.info("Card updated for user %s", user_id)
+    except Exception:
+        logger.exception("Card update verification failed")
+
+    return RedirectResponse(url=f"{get_settings().frontend_url}/settings?checkout=success", status_code=303)
+
+
 @router.get("/verify-session")
 async def verify_checkout_session(
     session_id: str,

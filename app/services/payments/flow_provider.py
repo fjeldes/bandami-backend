@@ -435,7 +435,7 @@ class FlowProvider(PaymentProvider):
             status=sub.status,
             current_period_start=sub.current_period_start.isoformat() if sub.current_period_start else None,
             current_period_end=sub.current_period_end.isoformat() if sub.current_period_end else None,
-            cancel_at_period_end=False,
+            cancel_at_period_end=sub.status == "canceled",
             plan_name=plan.name if plan else "Premium",
             plan_slug=plan.slug if plan else "premium",
             plan_amount=plan.price_cents / 100 if plan else 14.99,
@@ -463,7 +463,9 @@ class FlowProvider(PaymentProvider):
             except Exception:
                 logger.exception("Flow cancel subscription failed")
 
-        sub.status = "active"
+        sub.status = "canceled"
+        sub.canceled_at = datetime.now(timezone.utc)
+        sub.auto_renew = False
         db.commit()
         return {"status": "ok", "canceled_at_period_end": True}
 
@@ -515,7 +517,22 @@ class FlowProvider(PaymentProvider):
 
     async def create_portal(self, user_id: str, db: DbSession, UserProfile) -> dict:
         s = get_settings()
-        return {"url": f"{s.frontend_url}/settings"}
+        user = db.query(UserProfile).filter(UserProfile.id == user_id).first()
+        customer_id = user.stripe_customer_id if user else None
+
+        if not customer_id:
+            return {"url": f"{s.frontend_url}/settings"}
+
+        backend = self._backend_url()
+        url_return = f"{backend}/api/v1/payments/flow/card-update-callback?user_id={user_id}"
+
+        try:
+            result = await self._register_card(customer_id, url_return)
+            redirect_url = f"{result['url']}?token={result['token']}"
+            return {"url": redirect_url}
+        except Exception:
+            logger.exception("Failed to start card registration for portal")
+            return {"url": f"{s.frontend_url}/settings"}
 
     async def get_invoices(self, user_id: str, db: DbSession, UserProfile) -> list[dict]:
         from app.models.subscription import UserSubscription

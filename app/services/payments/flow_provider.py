@@ -119,7 +119,7 @@ class FlowProvider(PaymentProvider):
             "amount": self._amount_clp("premium"),
             "interval": 3,
             "interval_count": 1,
-            "trial_period_days": 0,
+            "trial_period_days": 7,
             "urlCallback": self._confirmation_url(),
         }
         try:
@@ -299,7 +299,7 @@ class FlowProvider(PaymentProvider):
         new_sub = UserSubscription(
             id=str(uuid4()), user_id=user_id, plan_id=str(plan.id),
             status="active", current_period_start=now,
-            current_period_end=now + timedelta(days=30),
+            current_period_end=now + timedelta(days=7),
             stripe_subscription_id=subscription_id,
             stripe_session_id=customer_id,
         )

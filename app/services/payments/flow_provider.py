@@ -316,7 +316,14 @@ class FlowProvider(PaymentProvider):
         })
         db.commit()
 
-        return {"status": "ok", "subscription_id": subscription_id}
+        plan_amount_clp = self._amount_clp("premium")
+        first_charge_clp = plan_amount_clp - 12000  # after WELCOME12000OFF coupon
+        return {
+            "status": "ok",
+            "subscription_id": subscription_id,
+            "first_charge_amount": round(first_charge_clp / 1000, 2),  # USD equiv
+            "next_charge_amount": round(plan_amount_clp / 1000, 2),    # USD equiv
+        }
 
     # -- webhook --------------------------------------------------------------
 

@@ -131,6 +131,10 @@ async def flow_card_callback(
     result = await provider.handle_card_callback(token, user_id, plan_slug, db, ctx)
 
     if result["status"] == "ok":
+        first_charge = result.get("first_charge_amount", 2.99)
+        next_charge = result.get("next_charge_amount", 14.99)
+        sep = "&" if "?" in success_url else "?"
+        success_url = f"{success_url}{sep}first_charge={first_charge}&next_charge={next_charge}"
         return RedirectResponse(url=success_url, status_code=303)
     logger.warning("Card callback failed: %s", result.get("reason", ""))
     return RedirectResponse(url=cancel_url, status_code=303)

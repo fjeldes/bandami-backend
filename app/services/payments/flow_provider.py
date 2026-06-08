@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import json as json_lib
 import logging
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlencode, parse_qs
@@ -66,9 +67,9 @@ class FlowProvider(PaymentProvider):
             r.raise_for_status()
             return r.json()
 
-    def _amount_clp(self, plan_slug: str, is_trial: bool = False) -> int:
+    def _amount_clp(self, plan_slug: str) -> int:
         if plan_slug == "premium":
-            return 2990 if is_trial else 14990
+            return 14990
         raise ValueError(f"No Flow price configured for: {plan_slug}")
 
     @staticmethod
@@ -99,8 +100,7 @@ class FlowProvider(PaymentProvider):
 
     def _card_callback_url(self, user_id: str, plan_slug: str, success_url: str, cancel_url: str) -> str:
         backend = self._backend_url()
-        import json
-        payload = json.dumps({"su": success_url, "ca": cancel_url})
+        payload = json_lib.dumps({"su": success_url, "ca": cancel_url})
         params = urlencode({
             "user_id": user_id,
             "plan_slug": plan_slug,
@@ -246,7 +246,6 @@ class FlowProvider(PaymentProvider):
         from app.models.subscription import SubscriptionPlan, UserSubscription
         plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.slug == plan_slug).first()
         if not plan:
-            logger.warning("Plan %s not found in local DB", plan_slug)
             return {"status": "failed", "reason": "plan_not_found"}
 
         existing = db.query(UserSubscription).filter(
@@ -290,8 +289,6 @@ class FlowProvider(PaymentProvider):
         UserProfile, UserSubscription, SubscriptionPlan,
     ) -> dict:
         token = event.get("token", "")
-        flow_order = str(event.get("flowOrder", ""))
-
         if not token:
             return {"status": "skipped", "reason": "missing_token"}
 
@@ -304,6 +301,8 @@ class FlowProvider(PaymentProvider):
         if str(status_data.get("status")) != "2":
             return {"status": "pending", "message": "payment_not_completed"}
 
+        flow_order = str(status_data.get("flowOrder", ""))
+
         if flow_order and db.query(UserSubscription).filter(
             UserSubscription.stripe_session_id == flow_order,
         ).first():
@@ -311,10 +310,16 @@ class FlowProvider(PaymentProvider):
 
         commerce_order = status_data.get("commerceOrder", "")
         parsed = self._parse_commerce_order(commerce_order)
-        if not parsed:
-            payment_flow_order = status_data.get("flowOrder", "")
-            return {"status": "skipped", "reason": "recurring_payment_not_handled", "flow_order": payment_flow_order}
 
+        if parsed:
+            return await self._process_one_time(parsed, status_data, flow_order, db, UserProfile, UserSubscription, SubscriptionPlan)
+
+        return await self._process_recurring(status_data, flow_order, db, UserProfile, UserSubscription, SubscriptionPlan)
+
+    async def _process_one_time(
+        self, parsed: tuple[str, str], status_data: dict, flow_order: str,
+        db: DbSession, UserProfile, UserSubscription, SubscriptionPlan,
+    ) -> dict:
         user_id, plan_slug = parsed
 
         plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.slug == plan_slug).first()
@@ -337,6 +342,37 @@ class FlowProvider(PaymentProvider):
         db.commit()
 
         return {"status": "ok", "plan": plan_slug, "user_id": user_id}
+
+    async def _process_recurring(
+        self, status_data: dict, flow_order: str,
+        db: DbSession, UserProfile, UserSubscription, SubscriptionPlan,
+    ) -> dict:
+        payer_email = status_data.get("payer", "")
+        if not payer_email:
+            return {"status": "skipped", "reason": "no_payer_email"}
+
+        user = db.query(UserProfile).filter(UserProfile.email == payer_email).first()
+        if not user:
+            logger.warning("Recurring payment user not found: %s", payer_email)
+            return {"status": "skipped", "reason": "user_not_found"}
+
+        sub = db.query(UserSubscription).filter(
+            UserSubscription.user_id == str(user.id),
+            UserSubscription.status == "active",
+            UserSubscription.stripe_subscription_id.isnot(None),
+        ).order_by(UserSubscription.current_period_end.desc()).first()
+
+        if not sub:
+            logger.warning("No active subscription for user %s", payer_email)
+            return {"status": "skipped", "reason": "no_active_subscription"}
+
+        now = datetime.now(timezone.utc)
+        sub.current_period_end = now + timedelta(days=30)
+        sub.stripe_session_id = flow_order
+        db.commit()
+
+        plan_slug = sub.plan.slug if sub.plan else "premium"
+        return {"status": "renewed", "plan": plan_slug, "user_id": str(user.id)}
 
     # -- get_subscription -----------------------------------------------------
 

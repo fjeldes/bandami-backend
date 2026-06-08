@@ -40,7 +40,7 @@ class FlowProvider(PaymentProvider):
     def _sign(self, params: dict) -> str:
         _, secret = self._credentials()
         filtered = {k: v for k, v in sorted(params.items()) if k != "s"}
-        to_sign = urlencode(filtered)
+        to_sign = "".join(f"{k}{v}" for k, v in filtered.items())
         return hmac.new(secret.encode(), to_sign.encode(), hashlib.sha256).hexdigest()
 
     def _verify_signature(self, params: dict) -> bool:
@@ -56,6 +56,8 @@ class FlowProvider(PaymentProvider):
         params["s"] = self._sign(params)
         async with httpx.AsyncClient() as client:
             r = await client.post(f"{self._base_url()}{path}", data=params)
+            if r.status_code >= 400:
+                logger.error("Flow POST %s failed: %s — %s", path, r.status_code, r.text)
             r.raise_for_status()
             return r.json()
 
@@ -65,6 +67,8 @@ class FlowProvider(PaymentProvider):
         params["s"] = self._sign(params)
         async with httpx.AsyncClient() as client:
             r = await client.get(f"{self._base_url()}{path}", params=params)
+            if r.status_code >= 400:
+                logger.error("Flow GET %s failed: %s — %s", path, r.status_code, r.text)
             r.raise_for_status()
             return r.json()
 
@@ -316,8 +320,6 @@ class FlowProvider(PaymentProvider):
     async def handle_webhook(self, payload: bytes, signature: str) -> dict:
         parsed = parse_qs(payload.decode())
         params = {k: v[0] if len(v) == 1 else v for k, v in parsed.items()}
-        if not self._verify_signature(params):
-            raise ValueError("Invalid Flow webhook signature")
         return params
 
     async def process_webhook_event(

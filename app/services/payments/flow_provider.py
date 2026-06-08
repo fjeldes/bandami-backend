@@ -268,13 +268,7 @@ class FlowProvider(PaymentProvider):
         })
         db.commit()
 
-        coupon_id = None
-        if ctx:
-            try:
-                c = json_lib.loads(ctx)
-                coupon_id = c.get("ci")
-            except (json_lib.JSONDecodeError, TypeError):
-                pass
+        coupon_id = await self._ensure_coupon_exists()
 
         try:
             sub_data = await self._create_subscription(customer_id, coupon_id)

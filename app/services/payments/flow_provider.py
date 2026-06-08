@@ -134,6 +134,9 @@ class FlowProvider(PaymentProvider):
     # -- Coupon management ----------------------------------------------------
 
     async def _ensure_coupon_exists(self) -> int | None:
+        s = get_settings()
+        if s.flow_coupon_id:
+            return s.flow_coupon_id
         params = {
             "name": self.COUPON_NAME,
             "currency": "CLP",

@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 class FlowProvider(PaymentProvider):
 
     FLOW_PLAN_ID = "premium_bandami"
+    COUPON_NAME = "WELCOME_12000_OFF"
 
     @property
     def provider_name(self) -> str:
@@ -98,9 +99,9 @@ class FlowProvider(PaymentProvider):
         s = get_settings()
         return getattr(s, "backend_url", None) or s.frontend_url
 
-    def _card_callback_url(self, user_id: str, plan_slug: str, success_url: str, cancel_url: str) -> str:
+    def _card_callback_url(self, user_id: str, plan_slug: str, success_url: str, cancel_url: str, coupon_id: int) -> str:
         backend = self._backend_url()
-        payload = json_lib.dumps({"su": success_url, "ca": cancel_url})
+        payload = json_lib.dumps({"su": success_url, "ca": cancel_url, "ci": coupon_id})
         params = urlencode({
             "user_id": user_id,
             "plan_slug": plan_slug,
@@ -118,13 +119,37 @@ class FlowProvider(PaymentProvider):
             "amount": self._amount_clp("premium"),
             "interval": 3,
             "interval_count": 1,
-            "trial_period_days": 7,
+            "trial_period_days": 0,
             "urlCallback": self._confirmation_url(),
         }
         try:
             await self._post("/plans/create", params)
         except httpx.HTTPStatusError:
             logger.info("Plan may already exist in Flow, continuing")
+
+    # -- Coupon management ----------------------------------------------------
+
+    async def _ensure_coupon_exists(self) -> int:
+        params = {
+            "name": self.COUPON_NAME,
+            "currency": "CLP",
+            "amount": 12000,
+            "duration": 1,
+            "times": 1,
+        }
+        try:
+            data = await self._post("/coupon/create", params)
+            return int(data["id"])
+        except httpx.HTTPStatusError:
+            logger.info("Coupon may already exist, fetching by name")
+        try:
+            data = await self._get("/coupon/list", {"filter": self.COUPON_NAME, "limit": 1, "status": 1})
+            items = data.get("data", [])
+            if items:
+                return int(items[0]["id"])
+        except Exception:
+            logger.exception("Failed to fetch existing coupon")
+        raise RuntimeError("Could not create or find welcome coupon in Flow")
 
     # -- Customer management --------------------------------------------------
 
@@ -151,12 +176,13 @@ class FlowProvider(PaymentProvider):
 
     # -- Subscription management ----------------------------------------------
 
-    async def _create_subscription(self, customer_id: str) -> dict:
+    async def _create_subscription(self, customer_id: str, coupon_id: int | None = None) -> dict:
         params = {
             "planId": self.FLOW_PLAN_ID,
             "customerId": customer_id,
-            "trial_period_days": 7,
         }
+        if coupon_id:
+            params["couponId"] = coupon_id
         return await self._post("/subscription/create", params)
 
     # -- create_checkout ------------------------------------------------------
@@ -186,6 +212,7 @@ class FlowProvider(PaymentProvider):
         from app.models.user import UserProfile
 
         await self._ensure_plan_exists()
+        coupon_id = await self._ensure_coupon_exists()
 
         db = SessionLocal()
         try:
@@ -205,7 +232,7 @@ class FlowProvider(PaymentProvider):
         finally:
             db.close()
 
-        url_return = self._card_callback_url(user_id, "premium", success_url, cancel_url)
+        url_return = self._card_callback_url(user_id, "premium", success_url, cancel_url, coupon_id)
         result = await self._register_card(flow_customer_id, url_return)
         redirect_url = f"{result['url']}?token={result['token']}"
         return {"url": redirect_url}
@@ -214,6 +241,7 @@ class FlowProvider(PaymentProvider):
 
     async def handle_card_callback(
         self, token: str, user_id: str, plan_slug: str, db: DbSession,
+        ctx: str = "",
     ) -> dict:
         try:
             status = await self._get_register_status(token)
@@ -234,8 +262,16 @@ class FlowProvider(PaymentProvider):
         })
         db.commit()
 
+        coupon_id = None
+        if ctx:
+            try:
+                c = json_lib.loads(ctx)
+                coupon_id = c.get("ci")
+            except (json_lib.JSONDecodeError, TypeError):
+                pass
+
         try:
-            sub_data = await self._create_subscription(customer_id)
+            sub_data = await self._create_subscription(customer_id, coupon_id)
         except Exception:
             logger.exception("Failed to create subscription in Flow")
             return {"status": "failed", "reason": "subscription_creation_failed"}
@@ -263,7 +299,7 @@ class FlowProvider(PaymentProvider):
         new_sub = UserSubscription(
             id=str(uuid4()), user_id=user_id, plan_id=str(plan.id),
             status="active", current_period_start=now,
-            current_period_end=now + timedelta(days=7),
+            current_period_end=now + timedelta(days=30),
             stripe_subscription_id=subscription_id,
             stripe_session_id=customer_id,
         )

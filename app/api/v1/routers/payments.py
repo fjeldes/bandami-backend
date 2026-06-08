@@ -128,7 +128,7 @@ async def flow_card_callback(
     form = await request.form()
     token = form.get("token", "")
 
-    result = await provider.handle_card_callback(token, user_id, plan_slug, db)
+    result = await provider.handle_card_callback(token, user_id, plan_slug, db, ctx)
 
     if result["status"] == "ok":
         return RedirectResponse(url=success_url, status_code=303)

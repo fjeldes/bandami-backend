@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class FlowProvider(PaymentProvider):
 
     FLOW_PLAN_ID = "premium_bandami"
-    COUPON_NAME = "WELCOME_12000_OFF"
+    COUPON_NAME = "WELCOME12000OFF"
 
     @property
     def provider_name(self) -> str:

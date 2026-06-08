@@ -318,6 +318,16 @@ class FlowProvider(PaymentProvider):
 
         plan_amount_clp = self._amount_clp("premium")
         first_charge_clp = plan_amount_clp - 12000  # after WELCOME12000OFF coupon
+        now_dt = now
+        from app.models.subscription import UserPayment
+        db.add(UserPayment(
+            user_id=user_id, subscription_id=new_sub.id if not existing else existing.id,
+            amount_clp=first_charge_clp, currency="CLP",
+            flow_invoice_id=subscription_id,
+            period_start=now_dt, period_end=now_dt + timedelta(days=7),
+            payment_type="first_charge",
+        ))
+        db.commit()
         return {
             "status": "ok",
             "subscription_id": subscription_id,
@@ -417,6 +427,17 @@ class FlowProvider(PaymentProvider):
         now = datetime.now(timezone.utc)
         sub.current_period_end = now + timedelta(days=30)
         sub.stripe_session_id = flow_order
+        db.flush()
+
+        actual_amount = float(status_data.get("amount", 0))
+        from app.models.subscription import UserPayment
+        db.add(UserPayment(
+            user_id=str(user.id), subscription_id=sub.id,
+            amount_clp=int(actual_amount), currency=status_data.get("currency", "CLP"),
+            flow_order=flow_order, flow_invoice_id=flow_order,
+            period_start=now, period_end=now + timedelta(days=30),
+            payment_type="recurring",
+        ))
         db.commit()
 
         plan_slug = sub.plan.slug if sub.plan else "premium"
@@ -542,17 +563,19 @@ class FlowProvider(PaymentProvider):
             return {"url": f"{s.frontend_url}/settings"}
 
     async def get_invoices(self, user_id: str, db: DbSession, UserProfile) -> list[dict]:
-        from app.models.subscription import UserSubscription
+        from app.models.subscription import UserPayment
 
-        subs = db.query(UserSubscription).filter(
-            UserSubscription.user_id == user_id,
-        ).order_by(UserSubscription.created_at.desc()).limit(6).all()
+        payments = db.query(UserPayment).filter(
+            UserPayment.user_id == user_id,
+        ).order_by(UserPayment.created_at.desc()).limit(12).all()
 
         return [{
-            "id": str(sub.id),
-            "amount_paid": float(sub.plan.price_cents / 100) if sub.plan else 0,
-            "status": sub.status,
-            "created": sub.created_at.isoformat() if sub.created_at else "",
+            "id": str(p.id),
+            "amount_paid": round(p.amount_clp / 1000, 2),
+            "status": p.status,
+            "created": p.created_at.isoformat() if p.created_at else "",
             "hosted_invoice_url": None,
             "invoice_pdf": None,
-        } for sub in subs]
+            "payment_type": p.payment_type,
+            "flow_order": p.flow_order,
+        } for p in payments]

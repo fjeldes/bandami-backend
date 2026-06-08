@@ -42,6 +42,7 @@ class UserProfile(Base):
     credit_packs = relationship("UserCreditPack", back_populates="user", lazy="dynamic")
     transactions = relationship("CreditTransaction", back_populates="user", lazy="dynamic")
     subscriptions = relationship("UserSubscription", back_populates="user", lazy="dynamic")
+    payments = relationship("UserPayment", back_populates="user", lazy="dynamic")
 
 
 class RefreshToken(Base):

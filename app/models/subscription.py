@@ -82,3 +82,23 @@ class CreditTransaction(Base):
     created_at = Column(DateTime(timezone=True), default=_now, nullable=False)
 
     user = relationship("UserProfile", back_populates="transactions")
+
+
+class UserPayment(Base):
+    __tablename__ = "user_payments"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("user_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    subscription_id = Column(UUID(as_uuid=True), ForeignKey("user_subscriptions.id", ondelete="SET NULL"), nullable=True)
+    amount_clp = Column(Integer, nullable=False)
+    currency = Column(String, nullable=False, default="CLP")
+    flow_order = Column(String, nullable=True)
+    flow_invoice_id = Column(String, nullable=True)
+    period_start = Column(DateTime(timezone=True), nullable=True)
+    period_end = Column(DateTime(timezone=True), nullable=True)
+    payment_type = Column(String, nullable=False, default="recurring")
+    status = Column(String, nullable=False, default="paid")
+    created_at = Column(DateTime(timezone=True), default=_now, nullable=False)
+
+    user = relationship("UserProfile", back_populates="payments")
+    subscription = relationship("UserSubscription")

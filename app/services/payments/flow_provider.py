@@ -103,7 +103,7 @@ class FlowProvider(PaymentProvider):
         s = get_settings()
         return getattr(s, "backend_url", None) or s.frontend_url
 
-    def _card_callback_url(self, user_id: str, plan_slug: str, success_url: str, cancel_url: str, coupon_id: int) -> str:
+    def _card_callback_url(self, user_id: str, plan_slug: str, success_url: str, cancel_url: str, coupon_id: int | None) -> str:
         backend = self._backend_url()
         payload = json_lib.dumps({"su": success_url, "ca": cancel_url, "ci": coupon_id})
         params = urlencode({
@@ -133,7 +133,7 @@ class FlowProvider(PaymentProvider):
 
     # -- Coupon management ----------------------------------------------------
 
-    async def _ensure_coupon_exists(self) -> int:
+    async def _ensure_coupon_exists(self) -> int | None:
         params = {
             "name": self.COUPON_NAME,
             "currency": "CLP",
@@ -145,7 +145,7 @@ class FlowProvider(PaymentProvider):
             data = await self._post("/coupon/create", params)
             return int(data["id"])
         except httpx.HTTPStatusError:
-            logger.info("Coupon may already exist, fetching by name")
+            logger.warning("Coupon already exists or cannot be created, proceeding without discount")
         try:
             data = await self._get("/coupon/list", {"filter": self.COUPON_NAME, "limit": 1, "status": 1})
             items = data.get("data", [])
@@ -153,7 +153,7 @@ class FlowProvider(PaymentProvider):
                 return int(items[0]["id"])
         except Exception:
             logger.exception("Failed to fetch existing coupon")
-        raise RuntimeError("Could not create or find welcome coupon in Flow")
+        return None
 
     # -- Customer management --------------------------------------------------
 

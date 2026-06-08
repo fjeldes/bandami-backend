@@ -40,7 +40,6 @@ class Settings(BaseSettings):
     flow_api_key: str = ""
     flow_secret_key: str = ""
     flow_environment: str = "sandbox"
-    flow_coupon_id: int = 0
 
     payment_provider: str = "stripe"
 

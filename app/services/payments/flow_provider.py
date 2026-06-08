@@ -438,7 +438,7 @@ class FlowProvider(PaymentProvider):
             cancel_at_period_end=sub.status == "canceled",
             plan_name=plan.name if plan else "Premium",
             plan_slug=plan.slug if plan else "premium",
-            plan_amount=plan.price_cents / 100 if plan else 14.99,
+            plan_amount=(plan.price_cents / 100 if plan else 14.99),
             plan_interval=plan.interval if plan else "month",
             card_last4=None,
             card_brand=None,

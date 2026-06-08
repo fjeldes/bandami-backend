@@ -134,29 +134,28 @@ class FlowProvider(PaymentProvider):
     # -- Coupon management ----------------------------------------------------
 
     async def _ensure_coupon_exists(self) -> int | None:
-        s = get_settings()
-        if s.flow_coupon_id:
-            return s.flow_coupon_id
         params = {
             "name": self.COUPON_NAME,
             "currency": "CLP",
             "amount": 12000,
             "duration": 1,
-            "times": 1,
+            "times": 0,
         }
         try:
             data = await self._post("/coupon/create", params)
             return int(data["id"])
-        except httpx.HTTPStatusError:
-            logger.warning("Coupon already exists, searching by name")
-        try:
-            data = await self._get("/coupon/list", {"limit": 100, "status": 1})
-            for c in data.get("data", []):
-                if c.get("name") == self.COUPON_NAME:
-                    return int(c["id"])
-        except Exception:
-            logger.exception("Failed to list coupons")
-        return None
+        except httpx.HTTPStatusError as exc:
+            logger.info("Coupon %s already exists, deleting and recreating", self.COUPON_NAME)
+            try:
+                existing = await self._get("/coupon/list", {"limit": 100, "status": 1})
+                for c in existing.get("data", []):
+                    if c.get("name") == self.COUPON_NAME:
+                        await self._post("/coupon/delete", {"couponId": int(c["id"])})
+                        break
+            except Exception:
+                logger.exception("Failed to delete existing coupon")
+            data = await self._post("/coupon/create", params)
+            return int(data["id"])
 
     # -- Customer management --------------------------------------------------
 

@@ -145,14 +145,14 @@ class FlowProvider(PaymentProvider):
             data = await self._post("/coupon/create", params)
             return int(data["id"])
         except httpx.HTTPStatusError:
-            logger.warning("Coupon already exists or cannot be created, proceeding without discount")
+            logger.warning("Coupon already exists, searching by name")
         try:
-            data = await self._get("/coupon/list", {"filter": self.COUPON_NAME, "limit": 1, "status": 1})
-            items = data.get("data", [])
-            if items:
-                return int(items[0]["id"])
+            data = await self._get("/coupon/list", {"limit": 100, "status": 1})
+            for c in data.get("data", []):
+                if c.get("name") == self.COUPON_NAME:
+                    return int(c["id"])
         except Exception:
-            logger.exception("Failed to fetch existing coupon")
+            logger.exception("Failed to list coupons")
         return None
 
     # -- Customer management --------------------------------------------------

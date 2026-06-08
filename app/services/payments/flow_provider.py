@@ -1,8 +1,3 @@
-# ============================================================
-# Flow.cl Payment Provider (Chile)
-# API: https://www.flow.cl/docs/api.html
-# ============================================================
-
 import hashlib
 import hmac
 import logging
@@ -20,6 +15,8 @@ logger = logging.getLogger(__name__)
 
 
 class FlowProvider(PaymentProvider):
+
+    FLOW_PLAN_ID = "premium_bandami"
 
     @property
     def provider_name(self) -> str:
@@ -60,6 +57,15 @@ class FlowProvider(PaymentProvider):
             r.raise_for_status()
             return r.json()
 
+    async def _get(self, path: str, params: dict) -> dict:
+        api_key, _ = self._credentials()
+        params["apiKey"] = api_key
+        params["s"] = self._sign(params)
+        async with httpx.AsyncClient() as client:
+            r = await client.get(f"{self._base_url()}{path}", params=params)
+            r.raise_for_status()
+            return r.json()
+
     def _amount_clp(self, plan_slug: str, is_trial: bool = False) -> int:
         if plan_slug == "premium":
             return 2990 if is_trial else 14990
@@ -67,9 +73,7 @@ class FlowProvider(PaymentProvider):
 
     @staticmethod
     def _plan_label(plan_slug: str) -> str:
-        labels = {
-            "premium": "Premium Mensual",
-        }
+        labels = {"premium": "Premium Mensual"}
         return labels.get(plan_slug, plan_slug)
 
     def _commerce_order(self, user_id: str, plan_slug: str) -> str:
@@ -89,50 +93,188 @@ class FlowProvider(PaymentProvider):
         backend = getattr(s, "backend_url", None) or s.frontend_url
         return f"{backend}/api/v1/payments/webhook"
 
+    def _backend_url(self) -> str:
+        s = get_settings()
+        return getattr(s, "backend_url", None) or s.frontend_url
+
+    def _card_callback_url(self, user_id: str, plan_slug: str, success_url: str, cancel_url: str) -> str:
+        backend = self._backend_url()
+        import json
+        payload = json.dumps({"su": success_url, "ca": cancel_url})
+        params = urlencode({
+            "user_id": user_id,
+            "plan_slug": plan_slug,
+            "ctx": payload,
+        })
+        return f"{backend}/api/v1/payments/flow/card-callback?{params}"
+
+    # -- Plan management ------------------------------------------------------
+
+    async def _ensure_plan_exists(self) -> None:
+        params = {
+            "planId": self.FLOW_PLAN_ID,
+            "name": "Premium Mensual",
+            "currency": "CLP",
+            "amount": self._amount_clp("premium"),
+            "interval": 3,
+            "interval_count": 1,
+            "trial_period_days": 7,
+            "urlCallback": self._confirmation_url(),
+        }
+        try:
+            await self._post("/plans/create", params)
+        except httpx.HTTPStatusError:
+            logger.info("Plan may already exist in Flow, continuing")
+
+    # -- Customer management --------------------------------------------------
+
+    async def _create_flow_customer(self, user_id: str, email: str, name: str = "") -> str:
+        params = {
+            "name": name or email.split("@")[0],
+            "email": email,
+            "externalId": user_id,
+        }
+        data = await self._post("/customer/create", params)
+        return data["customerId"]
+
+    # -- Card registration ----------------------------------------------------
+
+    async def _register_card(self, customer_id: str, url_return: str) -> dict:
+        params = {
+            "customerId": customer_id,
+            "url_return": url_return,
+        }
+        return await self._post("/customer/register", params)
+
+    async def _get_register_status(self, token: str) -> dict:
+        return await self._get("/customer/getRegisterStatus", {"token": token})
+
+    # -- Subscription management ----------------------------------------------
+
+    async def _create_subscription(self, customer_id: str) -> dict:
+        params = {
+            "planId": self.FLOW_PLAN_ID,
+            "customerId": customer_id,
+            "trial_period_days": 7,
+        }
+        return await self._post("/subscription/create", params)
+
     # -- create_checkout ------------------------------------------------------
 
     async def create_checkout(
         self, plan_slug: str, user_id: str, user_email: str,
         success_url: str, cancel_url: str, discount_percent: int = 0,
     ) -> dict:
-        commerce_order = self._commerce_order(user_id, plan_slug)
-        confirm_url = self._confirmation_url()
-
         if plan_slug == "premium":
-            params = {
-                "planName": self._plan_label(plan_slug),
-                "planAmount": self._amount_clp(plan_slug),
-                "planPeriod": "month",
-                "planCurrency": "clp",
-                "planTrialPeriod": 7,
-                "planTrialAmount": self._amount_clp(plan_slug, is_trial=True),
-                "commerceOrder": commerce_order,
-                "email": user_email,
-                "urlConfirmation": confirm_url,
-                "urlReturn": success_url,
-            }
-            try:
-                data = await self._post("/subscription/create", params)
-                return {"url": data["url"]}
-            except Exception:
-                logger.exception("Flow subscription creation failed")
-                raise
-        else:
-            params = {
-                "commerceOrder": commerce_order,
-                "subject": f"Bandami - {self._plan_label(plan_slug)}",
-                "amount": self._amount_clp(plan_slug),
-                "currency": "clp",
-                "email": user_email,
-                "urlConfirmation": confirm_url,
-                "urlReturn": success_url,
-            }
-            try:
-                data = await self._post("/payment/create", params)
-                return {"url": data["url"]}
-            except Exception:
-                logger.exception("Flow payment creation failed")
-                raise
+            return await self._subscription_checkout(user_id, user_email, success_url, cancel_url)
+
+        commerce_order = self._commerce_order(user_id, plan_slug)
+        params = {
+            "commerceOrder": commerce_order,
+            "subject": f"Bandami - {self._plan_label(plan_slug)}",
+            "amount": self._amount_clp(plan_slug),
+            "currency": "clp",
+            "email": user_email,
+            "urlConfirmation": self._confirmation_url(),
+            "urlReturn": success_url,
+        }
+        data = await self._post("/payment/create", params)
+        return {"url": data["url"]}
+
+    async def _subscription_checkout(self, user_id: str, user_email: str, success_url: str, cancel_url: str) -> dict:
+        from app.db.engine import SessionLocal
+        from app.models.user import UserProfile
+
+        await self._ensure_plan_exists()
+
+        db = SessionLocal()
+        try:
+            user = db.query(UserProfile).filter(UserProfile.id == user_id).first()
+            flow_customer_id = user.stripe_customer_id if user else None
+
+            if not flow_customer_id:
+                flow_customer_id = await self._create_flow_customer(
+                    user_id, user_email, user.full_name if user else "",
+                )
+                if user:
+                    user.stripe_customer_id = flow_customer_id
+                    db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+        url_return = self._card_callback_url(user_id, "premium", success_url, cancel_url)
+        result = await self._register_card(flow_customer_id, url_return)
+        redirect_url = f"{result['url']}?token={result['token']}"
+        return {"url": redirect_url}
+
+    # -- Card callback handler ------------------------------------------------
+
+    async def handle_card_callback(
+        self, token: str, user_id: str, plan_slug: str, db: DbSession,
+    ) -> dict:
+        try:
+            status = await self._get_register_status(token)
+        except Exception:
+            logger.exception("Failed to get card registration status")
+            return {"status": "failed", "reason": "api_error"}
+
+        if status.get("status") != "1":
+            return {"status": "failed", "reason": "card_not_registered"}
+
+        customer_id = status.get("customerId", "")
+        if not customer_id:
+            return {"status": "failed", "reason": "missing_customer_id"}
+
+        from app.models.user import UserProfile
+        db.query(UserProfile).filter(UserProfile.id == user_id).update({
+            "stripe_customer_id": customer_id,
+        })
+        db.commit()
+
+        try:
+            sub_data = await self._create_subscription(customer_id)
+        except Exception:
+            logger.exception("Failed to create subscription in Flow")
+            return {"status": "failed", "reason": "subscription_creation_failed"}
+
+        subscription_id = sub_data.get("subscriptionId", "")
+        now = datetime.now(timezone.utc)
+
+        from app.models.subscription import SubscriptionPlan, UserSubscription
+        plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.slug == plan_slug).first()
+        if not plan:
+            logger.warning("Plan %s not found in local DB", plan_slug)
+            return {"status": "failed", "reason": "plan_not_found"}
+
+        existing = db.query(UserSubscription).filter(
+            UserSubscription.user_id == user_id,
+            UserSubscription.status == "active",
+            UserSubscription.current_period_end > now,
+        ).first()
+
+        if existing:
+            existing.stripe_subscription_id = subscription_id
+            existing.stripe_session_id = customer_id
+            db.commit()
+            return {"status": "ok", "subscription_id": subscription_id}
+
+        new_sub = UserSubscription(
+            id=str(uuid4()), user_id=user_id, plan_id=str(plan.id),
+            status="active", current_period_start=now,
+            current_period_end=now + timedelta(days=7),
+            stripe_subscription_id=subscription_id,
+            stripe_session_id=customer_id,
+        )
+        db.add(new_sub)
+        db.query(UserProfile).filter(UserProfile.id == user_id).update({
+            "subscription_tier": "premium",
+        })
+        db.commit()
+
+        return {"status": "ok", "subscription_id": subscription_id}
 
     # -- webhook --------------------------------------------------------------
 
@@ -154,54 +296,44 @@ class FlowProvider(PaymentProvider):
             return {"status": "skipped", "reason": "missing_token"}
 
         try:
-            status_data = await self._post("/payment/getStatus", {"token": token})
+            status_data = await self._get("/payment/getStatus", {"token": token})
         except Exception:
             logger.exception("Failed to get payment status from Flow")
             return {"status": "failed", "reason": "api_error"}
 
-        if status_data.get("status") != "EXITO":
+        if str(status_data.get("status")) != "2":
             return {"status": "pending", "message": "payment_not_completed"}
 
-        if db.query(UserSubscription).filter(UserSubscription.stripe_session_id == flow_order).first():
+        if flow_order and db.query(UserSubscription).filter(
+            UserSubscription.stripe_session_id == flow_order,
+        ).first():
             return {"status": "already_processed"}
 
         commerce_order = status_data.get("commerceOrder", "")
         parsed = self._parse_commerce_order(commerce_order)
         if not parsed:
-            return {"status": "skipped", "reason": "invalid_commerce_order"}
+            payment_flow_order = status_data.get("flowOrder", "")
+            return {"status": "skipped", "reason": "recurring_payment_not_handled", "flow_order": payment_flow_order}
 
         user_id, plan_slug = parsed
 
         plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.slug == plan_slug).first()
-        if not plan or plan_slug not in ("premium", "exam_week_pass", "credit_pack_10", "credit_pack_25"):
+        if not plan:
             return {"status": "skipped", "reason": "invalid_plan"}
 
-        subscription_id = status_data.get("subscriptionId")
         now = datetime.now(timezone.utc)
-
-        # If recurring payment for an existing subscription → extend period
-        if subscription_id:
-            existing = db.query(UserSubscription).filter(
-                UserSubscription.stripe_subscription_id == subscription_id,
-                UserSubscription.status == "active",
-            ).first()
-            if existing:
-                existing.current_period_end = now + timedelta(days=30)
-                existing.stripe_session_id = flow_order
-                db.commit()
-                return {"status": "renewed", "plan": plan_slug, "user_id": user_id}
-
         days = 30 if plan_slug == "premium" else (7 if plan_slug == "exam_week_pass" else 365)
 
         new_sub = UserSubscription(
             id=str(uuid4()), user_id=user_id, plan_id=str(plan.id),
             status="active", current_period_start=now,
             current_period_end=now + timedelta(days=days),
-            stripe_subscription_id=subscription_id,
-            stripe_session_id=flow_order,
+            stripe_session_id=flow_order or str(status_data.get("flowOrder", "")),
         )
         db.add(new_sub)
-        db.query(UserProfile).filter(UserProfile.id == user_id).update({"subscription_tier": "premium"})
+        db.query(UserProfile).filter(UserProfile.id == user_id).update({
+            "subscription_tier": "premium",
+        })
         db.commit()
 
         return {"status": "ok", "plan": plan_slug, "user_id": user_id}
@@ -227,10 +359,10 @@ class FlowProvider(PaymentProvider):
             current_period_start=sub.current_period_start.isoformat() if sub.current_period_start else None,
             current_period_end=sub.current_period_end.isoformat() if sub.current_period_end else None,
             cancel_at_period_end=False,
-            plan_name=plan.name if plan else ("Week Pass" if is_one_time else "Premium"),
-            plan_slug=plan.slug if plan else ("exam_week_pass" if is_one_time else "premium"),
-            plan_amount=plan.price_cents / 100 if plan else (2.99 if is_one_time else 14.99),
-            plan_interval=plan.interval if plan else ("week" if is_one_time else "month"),
+            plan_name=plan.name if plan else "Premium",
+            plan_slug=plan.slug if plan else "premium",
+            plan_amount=plan.price_cents / 100 if plan else 14.99,
+            plan_interval=plan.interval if plan else "month",
             card_last4=None,
             card_brand=None,
         )
@@ -249,6 +381,7 @@ class FlowProvider(PaymentProvider):
             try:
                 await self._post("/subscription/cancel", {
                     "subscriptionId": sub.stripe_subscription_id,
+                    "at_period_end": 1,
                 })
             except Exception:
                 logger.exception("Flow cancel subscription failed")
@@ -264,10 +397,8 @@ class FlowProvider(PaymentProvider):
         ).first()
         if not sub:
             raise ValueError("No active subscription found")
-
         if not sub.stripe_subscription_id:
             raise ValueError("Cannot reactivate one-time purchase")
-
         raise ValueError(
             "Flow does not support reactivation. Please purchase a new subscription."
         )

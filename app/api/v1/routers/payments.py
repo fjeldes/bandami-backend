@@ -3,7 +3,8 @@ Payment router — delegates to the configured PaymentProvider (Stripe, Paddle, 
 """
 
 import logging
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Request, Depends, Query
+from fastapi.responses import RedirectResponse, HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -92,6 +93,47 @@ async def payment_webhook(
         event, db, UserProfile, UserSubscription, SubscriptionPlan,
     )
     return result
+
+
+@router.post("/flow/card-callback")
+async def flow_card_callback(
+    request: Request,
+    user_id: str = Query(...),
+    plan_slug: str = Query(...),
+    ctx: str = Query(""),
+    db: Session = Depends(get_db),
+):
+    import json
+    provider = _get_provider()
+    if provider.provider_name != "flow":
+        return HTMLResponse(content="Invalid provider", status_code=400)
+
+    success_url = ""
+    cancel_url = ""
+    if ctx:
+        try:
+            c = json.loads(ctx)
+            success_url = c.get("su", "")
+            cancel_url = c.get("ca", "")
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    if not success_url:
+        s = get_settings()
+        success_url = f"{s.frontend_url}/settings?checkout=success"
+    if not cancel_url:
+        s = get_settings()
+        cancel_url = f"{s.frontend_url}/pricing"
+
+    form = await request.form()
+    token = form.get("token", "")
+
+    result = await provider.handle_card_callback(token, user_id, plan_slug, db)
+
+    if result["status"] == "ok":
+        return RedirectResponse(url=success_url, status_code=303)
+    logger.warning("Card callback failed: %s", result.get("reason", ""))
+    return RedirectResponse(url=cancel_url, status_code=303)
 
 
 @router.get("/verify-session")

@@ -60,17 +60,17 @@ class FlowProvider(PaymentProvider):
             r.raise_for_status()
             return r.json()
 
-    def _amount_clp(self, plan_slug: str) -> int:
-        prices = {
-            "premium": 14990,
-            "exam_week_pass": 2990,
-            "credit_pack_10": 7990,
-            "credit_pack_25": 14990,
+    def _amount_clp(self, plan_slug: str, is_trial: bool = False) -> int:
+        if plan_slug == "premium":
+            return 2990 if is_trial else 14990
+        raise ValueError(f"No Flow price configured for: {plan_slug}")
+
+    @staticmethod
+    def _plan_label(plan_slug: str) -> str:
+        labels = {
+            "premium": "Premium Mensual",
         }
-        amt = prices.get(plan_slug)
-        if not amt:
-            raise ValueError(f"No Flow price configured for: {plan_slug}")
-        return amt
+        return labels.get(plan_slug, plan_slug)
 
     def _commerce_order(self, user_id: str, plan_slug: str) -> str:
         return f"{user_id}:{plan_slug}:{uuid4().hex[:6]}"
@@ -96,15 +96,16 @@ class FlowProvider(PaymentProvider):
         success_url: str, cancel_url: str, discount_percent: int = 0,
     ) -> dict:
         commerce_order = self._commerce_order(user_id, plan_slug)
-        amount = self._amount_clp(plan_slug)
         confirm_url = self._confirmation_url()
 
         if plan_slug == "premium":
             params = {
-                "planName": "Premium Mensual",
-                "planAmount": amount,
+                "planName": self._plan_label(plan_slug),
+                "planAmount": self._amount_clp(plan_slug),
                 "planPeriod": "month",
                 "planCurrency": "clp",
+                "planTrialPeriod": 7,
+                "planTrialAmount": self._amount_clp(plan_slug, is_trial=True),
                 "commerceOrder": commerce_order,
                 "email": user_email,
                 "urlConfirmation": confirm_url,
@@ -119,8 +120,8 @@ class FlowProvider(PaymentProvider):
         else:
             params = {
                 "commerceOrder": commerce_order,
-                "subject": f"Bandami - {plan_slug}",
-                "amount": amount,
+                "subject": f"Bandami - {self._plan_label(plan_slug)}",
+                "amount": self._amount_clp(plan_slug),
                 "currency": "clp",
                 "email": user_email,
                 "urlConfirmation": confirm_url,
@@ -176,8 +177,20 @@ class FlowProvider(PaymentProvider):
             return {"status": "skipped", "reason": "invalid_plan"}
 
         subscription_id = status_data.get("subscriptionId")
-
         now = datetime.now(timezone.utc)
+
+        # If recurring payment for an existing subscription → extend period
+        if subscription_id:
+            existing = db.query(UserSubscription).filter(
+                UserSubscription.stripe_subscription_id == subscription_id,
+                UserSubscription.status == "active",
+            ).first()
+            if existing:
+                existing.current_period_end = now + timedelta(days=30)
+                existing.stripe_session_id = flow_order
+                db.commit()
+                return {"status": "renewed", "plan": plan_slug, "user_id": user_id}
+
         days = 30 if plan_slug == "premium" else (7 if plan_slug == "exam_week_pass" else 365)
 
         new_sub = UserSubscription(

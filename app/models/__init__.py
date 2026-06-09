@@ -1,6 +1,8 @@
 from app.models.user import UserProfile, RefreshToken
 from app.models.exam import Exam, Evaluation, Question
 from app.models.subscription import SubscriptionPlan, UserSubscription, CreditTransaction, UserCreditPack
+from app.models.user_payment import UserPayment
+from app.models.study_plan import StudyPlan
 
 __all__ = [
     "UserProfile",
@@ -12,4 +14,6 @@ __all__ = [
     "UserSubscription",
     "CreditTransaction",
     "UserCreditPack",
+    "UserPayment",
+    "StudyPlan",
 ]

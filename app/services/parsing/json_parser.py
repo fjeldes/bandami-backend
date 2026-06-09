@@ -45,7 +45,11 @@ class JsonParser:
         criteria = {}
         criteria_pattern = re.findall(
             r'"(task_response|coherence_and_cohesion|lexical_resource|grammatical_range_and_accuracy'
-            r'|fluency_and_coherence|pronunciation)"\s*:\s*\{[^}]*?"score"\s*:\s*([\d.]+)[^}]*?\}',
+            r'|fluency_and_coherence|pronunciation'
+            r'|fluency|coherence|vocabulary_range|vocabulary_precision|paraphrasing'
+            r'|grammar_range|grammar_accuracy|pronunciation_clarity'
+            r'|task_fulfillment|position_clarity|paragraph_structure|cohesion_devices)"'
+            r'\s*:\s*\{[^}]*?"score"\s*:\s*([\d.]+)[^}]*?\}',
             raw, re.DOTALL,
         )
         for name, score in criteria_pattern:

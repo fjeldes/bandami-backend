@@ -252,7 +252,7 @@ def generate_fallback_criteria(overall_band: float, premium: bool = False) -> di
         score = clamp_band(band + offset)
         result[key] = {
             "score": score,
-            "comment": f"Score inferred from overall band ({band}). {desc.get(key, '')} Re-evaluate for detailed analysis.",
+            "comment": f"Estimated from overall band ({band}). {desc.get(key, '')}",
         }
 
     if premium:
@@ -271,7 +271,7 @@ def generate_fallback_criteria(overall_band: float, premium: bool = False) -> di
             score = clamp_band(parent_score + offset)
             result[key] = {
                 "score": score,
-                "comment": f"Score inferred from {parent.replace('_', ' ')} ({parent_score}). {desc.get(key, '')} Re-evaluate for detailed analysis.",
+                "comment": f"Estimated from {parent.replace('_', ' ')} ({parent_score}). {desc.get(key, '')}",
             }
 
     logger.warning(

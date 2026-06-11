@@ -277,7 +277,6 @@ async def verify_email(
     access_token = create_access_token(user_id)
     refresh_token = create_refresh_token(user_id)
     _store_refresh_token(db, user_id, refresh_token)
-    _set_refresh_cookie(response, refresh_token)
 
     return AuthResponse(
         access_token=access_token,

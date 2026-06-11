@@ -112,7 +112,7 @@ async def check_daily_limit(
     if used >= limit:
         raise HTTPException(
             status_code=402,
-            detail=f"Daily limit reached ({used}/{limit}). Upgrade to Premium for unlimited evaluations.",
+            detail=f"Daily limit reached ({used}/{limit}). Upgrade to Pro for unlimited practice.",
         )
 
     user_plan["eval_source"] = "daily"

@@ -242,7 +242,7 @@ async def generate_study_plan(
     """Generate a personalized 7-day study plan (premium only, max 4/month)."""
     is_premium = plan_info.get("tier", "free") == "premium" or plan_info.get("is_admin", False)
     if not is_premium:
-        raise HTTPException(status_code=402, detail="Study plan is a Premium feature")
+        raise HTTPException(status_code=402, detail="Study plan is a Pro feature")
 
     from datetime import timezone as dt_tz
     now = datetime.now(dt_tz.utc)

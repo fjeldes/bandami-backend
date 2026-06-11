@@ -9,7 +9,7 @@ UPDATE subscription_plans
 SET
     daily_eval_limit = 3,
     feedback_delay_hours = 0,
-    description = '3 daily evaluations with basic AI. Speaking Part 1 + Writing all. Instant score.'
+    description = '3 daily evaluations. Speaking Part 1 + Writing. Instant band score.'
 WHERE slug = 'free';
 
 UPDATE subscription_plans

@@ -146,16 +146,17 @@ def send_purchase_confirmation(to_email: str, name: str, plan_name: str, amount:
                   <p style="font-size: 18px; font-weight: 600; color: #1e3a8a; margin: 0;">✅ Payment Confirmed</p>
                   <p style="font-size: 14px; color: #475569; margin: 4px 0 0;">{plan_name} — {amount}</p>
                 </div>
-                <h2 style="font-size: 20px; color: #1e293b; margin: 0 0 16px;">Welcome to Premium, {name}!</h2>
+                <h2 style="font-size: 20px; color: #1e293b; margin: 0 0 16px;">Welcome to Pro, {name}!</h2>
                 <p style="font-size: 16px; color: #475569; line-height: 1.6; margin: 0 0 16px;">
                   Your payment was successful and your account has been upgraded. You now have access to:
                 </p>
                 <ul style="font-size: 15px; color: #475569; line-height: 1.8; padding-left: 20px; margin: 0 0 24px;">
-                  <li>30 evaluations per day with advanced AI</li>
+                  <li>Unlimited practice</li>
                   <li>Full criteria breakdowns and grammar corrections</li>
-                  <li>Instant detailed feedback on all exams</li>
-                  <li>Full IELTS Speaking Test (3 parts)</li>
-                  <li>Progress tracking and history</li>
+                  <li>Detailed IELTS analysis and personalized recommendations</li>
+                  <li>Complete IELTS Speaking Test (all 3 parts)</li>
+                  <li>Progress tracking and full history</li>
+                  <li>Personalized study plans</li>
                 </ul>
                 <p style="font-size: 14px; color: #64748b; margin: 0 0 24px;">
                   {period} · Cancel anytime from Settings

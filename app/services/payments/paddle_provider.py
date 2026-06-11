@@ -1,10 +1,5 @@
-# ============================================================
-# Paddle Payment Provider
-# Implements PaymentProvider ABC.
-# Paddle Billing API — https://developer.paddle.com
-# ============================================================
-
 import json
+import logging
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 
@@ -14,8 +9,12 @@ from sqlalchemy.orm import Session as DbSession
 from app.core.config import get_settings
 from app.services.payments.base import PaymentProvider, SubscriptionInfo
 
+logger = logging.getLogger(__name__)
+
 
 class PaddleProvider(PaymentProvider):
+
+    DISCOUNT_ID = "dsc_01ktwffxceyd4npja9cqy3s28p"
 
     @property
     def provider_name(self) -> str:
@@ -55,6 +54,8 @@ class PaddleProvider(PaymentProvider):
                 headers=self._headers(),
                 json=body,
             )
+            if r.status_code >= 400:
+                logger.error("Paddle POST %s failed: %s — %s", path, r.status_code, r.text)
             r.raise_for_status()
             return r.json()
 
@@ -65,6 +66,8 @@ class PaddleProvider(PaymentProvider):
                 headers=self._headers(),
                 params=params,
             )
+            if r.status_code >= 400:
+                logger.error("Paddle GET %s failed: %s — %s", path, r.status_code, r.text)
             r.raise_for_status()
             return r.json()
 
@@ -75,6 +78,8 @@ class PaddleProvider(PaymentProvider):
                 headers=self._headers(),
                 json=body,
             )
+            if r.status_code >= 400:
+                logger.error("Paddle PATCH %s failed: %s — %s", path, r.status_code, r.text)
             r.raise_for_status()
             return r.json()
 
@@ -86,7 +91,7 @@ class PaddleProvider(PaymentProvider):
     ) -> dict:
         price_id = self._price_id(plan_slug)
 
-        body: dict = {
+        body = {
             "items": [{"price_id": price_id, "quantity": 1}],
             "customer": {"email": user_email},
             "custom_data": {"user_id": user_id, "plan_slug": plan_slug},
@@ -98,8 +103,8 @@ class PaddleProvider(PaymentProvider):
             },
         }
 
-        # Paddle doesn't support discount_percent natively; skip for now
-        # Can be added via Paddle coupons/discounts API later
+        if plan_slug == "premium":
+            body["discount_id"] = self.DISCOUNT_ID
 
         data = await self._post("/transactions", body)
         return {"url": data["data"]["checkout"]["url"]}
@@ -107,15 +112,28 @@ class PaddleProvider(PaymentProvider):
     # -- webhook --------------------------------------------------------------
 
     async def handle_webhook(self, payload: bytes, signature: str) -> dict:
-        """Paddle webhooks use HMAC SHA-256 verification."""
+        """Paddle webhooks use HMAC SHA-256 with ts=...;h1=... header format."""
         import hmac
         import hashlib
 
+        parts = {}
+        for pair in signature.split(";"):
+            if "=" in pair:
+                k, v = pair.split("=", 1)
+                parts[k.strip()] = v.strip()
+
+        ts = parts.get("ts", "")
+        h1 = parts.get("h1", "")
+        if not ts or not h1:
+            raise ValueError("Invalid Paddle webhook signature format")
+
         s = get_settings()
         secret = getattr(s, "paddle_webhook_secret", "") or ""
-        computed = hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(computed, signature):
-            raise ValueError("Invalid webhook signature")
+        signed_payload = f"{ts}:{payload.decode()}"
+        computed = hmac.new(secret.encode(), signed_payload.encode(), hashlib.sha256).hexdigest()
+
+        if not hmac.compare_digest(computed, h1):
+            raise ValueError("Invalid Paddle webhook signature")
 
         return json.loads(payload)
 
@@ -127,9 +145,9 @@ class PaddleProvider(PaymentProvider):
         data = event.get("data", {})
 
         if event_type == "transaction.completed":
-            return _paddle_handle_transaction_completed(data, db, UserProfile, UserSubscription, SubscriptionPlan)
+            return self._handle_transaction_completed(data, db, UserProfile, UserSubscription, SubscriptionPlan)
 
-        elif event_type == "subscription.canceled":
+        if event_type == "subscription.canceled":
             sub_id = data.get("id")
             if sub_id:
                 sub = db.query(UserSubscription).filter(
@@ -137,11 +155,13 @@ class PaddleProvider(PaymentProvider):
                 ).first()
                 if sub:
                     sub.status = "canceled"
+                    sub.canceled_at = datetime.now(timezone.utc)
+                    sub.auto_renew = False
                     db.query(UserProfile).filter(UserProfile.id == sub.user_id).update({"subscription_tier": "free"})
                     db.commit()
             return {"status": "ok"}
 
-        elif event_type == "subscription.updated":
+        if event_type == "subscription.updated":
             sub_id = data.get("id")
             if sub_id:
                 sub = db.query(UserSubscription).filter(
@@ -152,10 +172,124 @@ class PaddleProvider(PaymentProvider):
                     period_end = data.get("current_billing_period", {}).get("ends_at")
                     if period_end:
                         sub.current_period_end = datetime.fromisoformat(period_end.replace("Z", "+00:00"))
+                    scheduled_change = data.get("scheduled_change")
+                    if scheduled_change and scheduled_change.get("action") == "cancel":
+                        sub.auto_renew = False
                     db.commit()
             return {"status": "ok"}
 
         return {"status": "unhandled_event", "type": event_type}
+
+    # -- verify_transaction (synchronous provisioning for frontend) -----------
+
+    async def verify_transaction(
+        self, transaction_id: str, user_id: str, db: DbSession,
+        UserProfile, UserSubscription, SubscriptionPlan,
+    ) -> dict:
+        try:
+            data = await self._get(f"/transactions/{transaction_id}")
+        except Exception:
+            return {"status": "error", "message": "Invalid transaction ID"}
+
+        txn = data.get("data", {})
+        if txn.get("status") not in ("completed", "paid"):
+            return {"status": "pending", "message": "Payment not completed"}
+
+        if db.query(UserSubscription).filter(UserSubscription.stripe_session_id == transaction_id).first():
+            return {"status": "already_processed"}
+
+        custom_data = txn.get("custom_data", {}) or {}
+        txn_user_id = custom_data.get("user_id")
+        txn_plan_slug = custom_data.get("plan_slug")
+
+        if not txn_user_id or txn_user_id != user_id:
+            return {"status": "error", "message": "Transaction does not match user"}
+
+        if not txn_plan_slug:
+            return {"status": "error", "message": "Missing plan in transaction"}
+
+        self._handle_transaction_completed(txn, db, UserProfile, UserSubscription, SubscriptionPlan)
+        return {"status": "ok"}
+
+    # -- transaction.completed handler ----------------------------------------
+
+    def _handle_transaction_completed(
+        self, data: dict, db: DbSession,
+        UserProfile, UserSubscription, SubscriptionPlan,
+    ) -> dict:
+        transaction_id = data.get("id")
+        subscription_id = data.get("subscription_id")
+        customer_id = data.get("customer_id", "")
+
+        if not subscription_id:
+            return {"status": "skipped", "reason": "no_subscription_id"}
+
+        # --- RECURRING PAYMENT: extend existing subscription ---
+        existing_sub = db.query(UserSubscription).filter(
+            UserSubscription.stripe_subscription_id == subscription_id,
+        ).first()
+
+        if existing_sub:
+            now = datetime.now(timezone.utc)
+            existing_sub.current_period_end = now + timedelta(days=30)
+            db.flush()
+
+            totals = data.get("details", {}).get("totals", {})
+            amount_cents = int(totals.get("grand_total", 1499))
+            from app.models.subscription import UserPayment
+            db.add(UserPayment(
+                user_id=str(existing_sub.user_id), subscription_id=existing_sub.id,
+                amount_clp=amount_cents, currency="USD",
+                flow_order=transaction_id, flow_invoice_id=transaction_id,
+                period_start=now, period_end=now + timedelta(days=30),
+                payment_type="recurring",
+            ))
+            db.commit()
+            return {"status": "renewed", "subscription_id": subscription_id}
+
+        # --- NEW SUBSCRIPTION ---
+        custom_data = data.get("custom_data", {}) or {}
+        user_id = custom_data.get("user_id")
+        plan_slug = custom_data.get("plan_slug")
+
+        if not user_id or not plan_slug:
+            return {"status": "skipped", "reason": "missing_custom_data"}
+
+        if db.query(UserSubscription).filter(UserSubscription.stripe_session_id == transaction_id).first():
+            return {"status": "already_processed"}
+
+        plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.slug == plan_slug).first()
+        if not plan or plan_slug not in ("premium", "exam_week_pass"):
+            return {"status": "skipped"}
+
+        now = datetime.now(timezone.utc)
+        days = 30 if plan_slug == "premium" else 7
+
+        new_sub = UserSubscription(
+            id=str(uuid4()), user_id=user_id, plan_id=str(plan.id),
+            status="active", current_period_start=now, current_period_end=now + timedelta(days=days),
+            stripe_subscription_id=subscription_id, stripe_session_id=transaction_id,
+        )
+        db.add(new_sub)
+
+        update = {"subscription_tier": "premium"}
+        if customer_id:
+            update["stripe_customer_id"] = customer_id
+        db.query(UserProfile).filter(UserProfile.id == user_id).update(update)
+        db.flush()
+
+        totals = data.get("details", {}).get("totals", {})
+        amount_cents = int(totals.get("grand_total", 299))
+        from app.models.subscription import UserPayment
+        db.add(UserPayment(
+            user_id=user_id, subscription_id=new_sub.id,
+            amount_clp=amount_cents, currency="USD",
+            flow_order=transaction_id, flow_invoice_id=transaction_id,
+            period_start=now, period_end=now + timedelta(days=days),
+            payment_type="first_charge",
+        ))
+        db.commit()
+        return {"status": "ok"}
 
     # -- get_subscription -----------------------------------------------------
 
@@ -171,7 +305,6 @@ class PaddleProvider(PaymentProvider):
         plan = sub.plan
         is_one_time = not sub.stripe_subscription_id
 
-        # For Paddle subscriptions, try to fetch from API
         card_last4 = None
         card_brand = None
         if sub.stripe_subscription_id and not is_one_time:
@@ -191,11 +324,11 @@ class PaddleProvider(PaymentProvider):
             status=sub.status,
             current_period_start=sub.current_period_start.isoformat() if sub.current_period_start else None,
             current_period_end=sub.current_period_end.isoformat() if sub.current_period_end else None,
-            cancel_at_period_end=False,
+            cancel_at_period_end=not sub.auto_renew,
             plan_name=plan.name if plan else ("Week Pass" if is_one_time else "Premium"),
             plan_slug=plan.slug if plan else ("exam_week_pass" if is_one_time else "premium"),
-            plan_amount=4.99 if is_one_time else 14.99,
-            plan_interval="week" if is_one_time else "month",
+            plan_amount=plan.price_cents / 100 if plan else (4.99 if is_one_time else 14.99),
+            plan_interval=plan.interval if plan else ("week" if is_one_time else "month"),
             card_last4=card_last4,
             card_brand=card_brand,
         )
@@ -216,9 +349,9 @@ class PaddleProvider(PaymentProvider):
                     "scheduled_change": {"action": "cancel", "effective_at": "next_billing_period"},
                 })
             except Exception:
-                pass
+                logger.exception("Paddle cancel subscription failed")
 
-        sub.status = "active"
+        sub.auto_renew = False
         db.commit()
         return {"status": "ok", "canceled_at_period_end": True}
 
@@ -236,11 +369,17 @@ class PaddleProvider(PaymentProvider):
                     "scheduled_change": None,
                 })
             except Exception:
-                pass
+                logger.exception("Paddle reactivate subscription failed")
 
+        sub.auto_renew = True
+        db.commit()
         return {"status": "ok"}
 
-    async def switch_plan(self, new_plan_slug: str, user_id: str, user_email: str, frontend_url: str, db: DbSession, UserProfile, UserSubscription, SubscriptionPlan) -> dict:
+    async def switch_plan(
+        self, new_plan_slug: str, user_id: str, user_email: str,
+        frontend_url: str, db: DbSession,
+        UserProfile, UserSubscription, SubscriptionPlan,
+    ) -> dict:
         s = get_settings()
 
         sub = db.query(UserSubscription).filter(
@@ -255,7 +394,6 @@ class PaddleProvider(PaymentProvider):
         if not user:
             raise ValueError("User not found")
 
-        # One-time → subscription: redirect to checkout
         is_one_time = not sub.stripe_subscription_id
         if is_one_time and new_plan_slug == "premium":
             result = await self.create_checkout(
@@ -268,7 +406,6 @@ class PaddleProvider(PaymentProvider):
         if is_one_time:
             raise ValueError("Current plan cannot be switched")
 
-        # Subscription → subscription: update via Paddle API
         if sub.stripe_subscription_id:
             try:
                 new_price_id = self._price_id(new_plan_slug)
@@ -277,7 +414,7 @@ class PaddleProvider(PaymentProvider):
                     "proration_billing_mode": "prorated_immediately",
                 })
             except Exception:
-                pass
+                logger.exception("Paddle switch plan failed")
 
         plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.slug == new_plan_slug).first()
         if plan:
@@ -287,56 +424,23 @@ class PaddleProvider(PaymentProvider):
         return {"status": "ok", "plan": new_plan_slug}
 
     async def create_portal(self, user_id: str, db: DbSession, UserProfile) -> dict:
-        # Paddle doesn't have a hosted portal like Stripe. Return self-serve page.
         s = get_settings()
         return {"url": f"{s.frontend_url}/settings"}
 
     async def get_invoices(self, user_id: str, db: DbSession, UserProfile) -> list[dict]:
-        user = db.query(UserProfile).filter(UserProfile.id == user_id).first()
-        if not user:
-            return []
+        from app.models.subscription import UserPayment
 
-        try:
-            data = await self._get("/transactions", {"customer_id": user.email, "status": "completed"})
-            return [{
-                "id": t["id"],
-                "amount_paid": float(t.get("details", {}).get("totals", {}).get("grand_total", 0)) / 100,
-                "status": t.get("status", "paid"),
-                "created": t.get("created_at", ""),
-                "hosted_invoice_url": None,
-                "invoice_pdf": None,
-            } for t in data.get("data", [])[:6]]
-        except Exception:
-            return []
+        payments = db.query(UserPayment).filter(
+            UserPayment.user_id == user_id,
+        ).order_by(UserPayment.created_at.desc()).limit(12).all()
 
-
-# -- module-level helpers ----------------------------------------------------
-
-def _paddle_handle_transaction_completed(data, db, UserProfile, UserSubscription, SubscriptionPlan) -> dict:
-    custom_data = data.get("custom_data", {}) or {}
-    user_id = custom_data.get("user_id")
-    plan_slug = custom_data.get("plan_slug")
-    transaction_id = data.get("id")
-
-    if not user_id or not plan_slug:
-        return {"status": "skipped", "reason": "missing custom_data"}
-
-    if db.query(UserSubscription).filter(UserSubscription.stripe_session_id == transaction_id).first():
-        return {"status": "already_processed"}
-
-    plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.slug == plan_slug).first()
-    if not plan or plan_slug not in ("premium", "exam_week_pass"):
-        return {"status": "skipped"}
-
-    now = datetime.now(timezone.utc)
-    days = 30 if plan_slug == "premium" else 7
-    subscription_id = data.get("subscription_id")
-
-    db.add(UserSubscription(
-        id=str(uuid4()), user_id=user_id, plan_id=str(plan.id),
-        status="active", current_period_start=now, current_period_end=now + timedelta(days=days),
-        stripe_subscription_id=subscription_id, stripe_session_id=transaction_id,
-    ))
-    db.query(UserProfile).filter(UserProfile.id == user_id).update({"subscription_tier": "premium"})
-    db.commit()
-    return {"status": "ok"}
+        return [{
+            "id": str(p.id),
+            "amount_paid": round(p.amount_clp / 100, 2),
+            "status": p.status,
+            "created": p.created_at.isoformat() if p.created_at else "",
+            "hosted_invoice_url": None,
+            "invoice_pdf": None,
+            "payment_type": p.payment_type,
+            "paddle_transaction_id": p.flow_order,
+        } for p in payments]

@@ -173,6 +173,14 @@ async def verify_checkout_session(
 ):
     """Client-side fallback: verify a checkout session and provision if paid."""
     provider = _get_provider()
+
+    if provider.provider_name == "paddle":
+        from app.services.payments.paddle_provider import PaddleProvider
+        paddle = provider  # type: PaddleProvider
+        return await paddle.verify_transaction(
+            session_id, user_id, db, UserProfile, UserSubscription, SubscriptionPlan,
+        )
+
     if provider.provider_name != "stripe":
         return {"status": "skipped", "reason": "not supported for this provider"}
 

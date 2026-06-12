@@ -12,7 +12,7 @@ from app.core.auth import (
     compute_feedback_unlocks_at,
 )
 from app.core.limiter import limiter
-from app.services.providers.base import WritingEvaluator, WRITING_CRITERIA_KEYS
+from app.services.providers.base import WritingEvaluator, WRITING_CRITERIA_KEYS, ProviderUnavailableError
 from app.core.config import get_settings
 from datetime import datetime, timezone
 import traceback
@@ -20,6 +20,14 @@ import logging
 
 logger = logging.getLogger("ielts.writing")
 router = APIRouter()
+
+
+def _is_provider_error(e: Exception) -> bool:
+    msg = str(e).lower()
+    return any(kw in msg for kw in [
+        "timeout", "unavailable", "connection", "503", "500",
+        "retry", "deadline", "429", "service", "reset",
+    ])
 
 
 def _filter_writing_criteria(criteria: dict, is_visible: bool) -> dict:
@@ -91,7 +99,12 @@ async def evaluate_writing_endpoint(
 
     try:
         task_type = exam.task_type or submission.task_type or "task2"
-        result = await provider.evaluate_writing(submission.text, task_type, detailed=not is_free)
+        try:
+            result = await provider.evaluate_writing(submission.text, task_type, detailed=not is_free)
+        except Exception as e:
+            if _is_provider_error(e):
+                raise ProviderUnavailableError(str(e)) from e
+            raise
 
         ev = Evaluation(
             exam_id=exam.id,
@@ -130,6 +143,15 @@ async def evaluate_writing_endpoint(
             feedback_unlocks_at=unlocks_at,
             is_feedback_visible=is_visible,
             created_at=ev.created_at,
+        )
+
+    except ProviderUnavailableError as e:
+        logger.warning(f"Provider unavailable: {e}")
+        exam.status = "pending"
+        db.commit()
+        raise HTTPException(
+            status_code=503,
+            detail="Our AI agent is currently experiencing high demand. Please try again later.",
         )
 
     except Exception as e:

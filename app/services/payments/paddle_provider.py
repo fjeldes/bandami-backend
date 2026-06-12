@@ -107,7 +107,10 @@ class PaddleProvider(PaymentProvider):
             body["discount_id"] = self.DISCOUNT_ID
 
         data = await self._post("/transactions", body)
-        return {"url": data["data"]["checkout"]["url"]}
+        return {
+            "url": data["data"]["checkout"]["url"],
+            "transaction_id": data["data"]["id"],
+        }
 
     # -- webhook --------------------------------------------------------------
 

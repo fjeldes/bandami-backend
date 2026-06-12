@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
@@ -8,8 +9,9 @@ from app.db.deps import get_db
 from app.models.exam import Exam, Evaluation
 from app.schemas.evaluation import EvaluationResponse, ExamCreate, ExamResponse
 from app.core.auth import get_current_user, get_user_plan_info, check_daily_limit, get_ai_provider, compute_feedback_unlocks_at
-from app.services.providers.base import ReadingEvaluator
+from app.services.providers.base import ReadingEvaluator, ProviderUnavailableError
 
+logger = logging.getLogger("ielts.reading")
 router = APIRouter()
 
 
@@ -97,10 +99,20 @@ async def evaluate_reading(
             ai_model_used=result.model, tokens_used=result.tokens, processing_time_ms=result.processing_time_ms,
             feedback_unlocks_at=unlocks_at, is_feedback_visible=is_visible, created_at=ev.created_at,
         )
+    except ProviderUnavailableError as e:
+        logger.warning("Provider unavailable: %s", e)
+        exam.status = "pending"
+        db.commit()
+        raise HTTPException(
+            status_code=503,
+            detail="Our AI agent is currently experiencing high demand. Please try again later.",
+        )
+
     except Exception as e:
+        logger.exception("Evaluation failed for exam=%s user=%s", exam.id, user_id)
         exam.status = "failed"
         db.commit()
-        raise HTTPException(status_code=500, detail=f"Evaluation failed: {str(e)[:200]}")
+        raise HTTPException(status_code=500, detail="Evaluation failed. Please try again.")
 
 
 @router.get("/{exam_id}/evaluation", response_model=EvaluationResponse)

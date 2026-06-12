@@ -3,6 +3,7 @@ Auth router: register, login, refresh, verify-email, logout, password reset.
 Uses SQLAlchemy ORM — no Supabase dependency.
 """
 
+import logging
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Body, Depends, BackgroundTasks, Request, Response, Cookie
 from pydantic import BaseModel, EmailStr, Field
@@ -29,6 +30,7 @@ from app.services.email_service import send_verification_email, send_password_re
 from app.core.limiter import limiter
 from app.core.auth import _calc_plan_info
 
+logger = logging.getLogger("ielts.auth")
 router = APIRouter()
 
 
@@ -170,7 +172,6 @@ async def register(
         referrer = db.query(UserProfile).filter(UserProfile.id == referred_by).first()
         if referrer:
             referrer.referral_discounts = (referrer.referral_discounts or 0) + 1
-            # Also give discount to the new user who signed up with referral
             new_user = db.query(UserProfile).filter(UserProfile.id == user_id).first()
             if new_user:
                 new_user.referral_discounts = (new_user.referral_discounts or 0) + 1
@@ -180,6 +181,7 @@ async def register(
 
     background_tasks.add_task(send_verification_email, body.email, body.full_name, verification_token)
 
+    logger.info("User registered uid=%s email=%s referral=%s", user_id, body.email, bool(referred_by))
     return MessageResponse(message="Account created. Please check your email to verify your account.")
 
 
@@ -192,9 +194,11 @@ async def login(
 ):
     user = db.execute(select(UserProfile).where(UserProfile.email == body.email)).scalar()
     if not user or not user.hashed_password:
+        logger.warning("Login failed: user not found email=%s", body.email)
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     if not verify_password(body.password, user.hashed_password):
+        logger.warning("Login failed: wrong password uid=%s email=%s", user.id, body.email)
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     if not user.email_confirmed_at:
@@ -205,6 +209,7 @@ async def login(
 
     _store_refresh_token(db, str(user.id), refresh_token)
 
+    logger.info("Login success uid=%s email=%s", user.id, user.email)
     return AuthResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -278,6 +283,7 @@ async def verify_email(
     refresh_token = create_refresh_token(user_id)
     _store_refresh_token(db, user_id, refresh_token)
 
+    logger.info("Email verified uid=%s email=%s", user_id, user.email)
     return AuthResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -313,6 +319,7 @@ async def logout(
     token_hash = _hash_token(body.refresh_token)
     db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).update({"revoked": True})
     db.commit()
+    logger.info("Logout success")
     return MessageResponse(message="Logged out successfully")
 
 
@@ -351,6 +358,7 @@ async def reset_password(
     db.query(UserProfile).filter(UserProfile.id == user_id).update({"hashed_password": hashed})
     _revoke_user_tokens(db, user_id)
 
+    logger.info("Password reset uid=%s", user_id)
     return MessageResponse(message="Password reset successfully. You can now sign in with your new password.")
 
 

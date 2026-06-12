@@ -13,9 +13,7 @@ from app.core.auth import (
 )
 from app.core.limiter import limiter
 from app.services.providers.base import WritingEvaluator, WRITING_CRITERIA_KEYS, ProviderUnavailableError
-from app.core.config import get_settings
 from datetime import datetime, timezone
-import traceback
 import logging
 
 logger = logging.getLogger("ielts.writing")
@@ -155,10 +153,7 @@ async def evaluate_writing_endpoint(
         )
 
     except Exception as e:
-        settings = get_settings()
-        tb = traceback.format_exc()
-        if settings.debug:
-            logger.error(f"Evaluation failed:\n{tb}")
+        logger.exception("Evaluation failed for exam=%s user=%s", exam.id, user_id)
         exam.status = "failed"
         db.commit()
         raise HTTPException(status_code=500, detail="Evaluation failed. Please try again.")

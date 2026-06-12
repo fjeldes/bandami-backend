@@ -48,7 +48,7 @@ async def create_checkout(
     now = datetime.now(timezone.utc)
     active = db.query(UserSubscription).filter(
         UserSubscription.user_id == user_id,
-        UserSubscription.status.in_(["active", "trialing"]),
+        UserSubscription.status.in_(["active", "trialing", "cancel_at_period_end"]),
         UserSubscription.current_period_end > now,
     ).first()
     if active:
@@ -86,12 +86,16 @@ async def payment_webhook(
 
     try:
         event = await provider.handle_webhook(payload, signature)
+        logger.info("Webhook received provider=%s event_type=%s", provider.provider_name, event.get("event_type", "unknown"))
     except Exception:
+        logger.warning("Webhook signature verification failed provider=%s", provider.provider_name)
         raise HTTPException(status_code=400, detail="Invalid webhook signature")
 
     result = await provider.process_webhook_event(
         event, db, UserProfile, UserSubscription, SubscriptionPlan,
     )
+    logger.info("Webhook processed provider=%s event_type=%s result=%s",
+                provider.provider_name, event.get("event_type", "unknown"), result.get("status"))
     return result
 
 

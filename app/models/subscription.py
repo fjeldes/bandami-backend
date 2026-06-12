@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    Column, String, Integer, Boolean, DateTime, ForeignKey, Text, JSON,
+    Column, String, Integer, Boolean, DateTime, ForeignKey, Text, JSON, Index,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -42,7 +42,7 @@ class UserSubscription(Base):
     plan_id = Column(UUID(as_uuid=True), ForeignKey("subscription_plans.id"), nullable=False)
     status = Column(String, nullable=False, default="active")
     stripe_subscription_id = Column(String, nullable=True)
-    stripe_session_id = Column(String, nullable=True)
+    stripe_session_id = Column(String, nullable=True, unique=True)
     current_period_start = Column(DateTime(timezone=True), default=_now, nullable=False)
     current_period_end = Column(DateTime(timezone=True), default=_now, nullable=False)
     canceled_at = Column(DateTime(timezone=True), nullable=True)
@@ -52,6 +52,8 @@ class UserSubscription(Base):
 
     user = relationship("UserProfile", back_populates="subscriptions")
     plan = relationship("SubscriptionPlan")
+
+Index("ix_user_subscriptions_stripe_session_id", UserSubscription.stripe_session_id)
 
 
 class UserCreditPack(Base):

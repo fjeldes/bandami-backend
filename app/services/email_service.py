@@ -3,12 +3,14 @@ Email service using Brevo (Sendinblue) for transactional emails.
 Free tier: 300 emails/day.
 """
 
+import logging
 import re
 import sib_api_v3_sdk
 from sib_api_v3_sdk.rest import ApiException
 
 from app.core.config import get_settings
 
+logger = logging.getLogger("ielts.email")
 settings = get_settings()
 
 
@@ -35,8 +37,8 @@ def _send_email(to_email: str, subject: str, html: str) -> None:
             html_content=html,
         )
         api.send_transac_email(msg)
-    except ApiException:
-        pass
+    except ApiException as e:
+        logger.error("Failed to send email to=%s subject=%s reason=%s", to_email, subject, e)
 
 
 FRONTEND_URL = settings.frontend_url

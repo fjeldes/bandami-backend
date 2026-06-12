@@ -142,12 +142,13 @@ class PaddleProvider(PaymentProvider):
     ) -> dict:
         event_type = event.get("event_type", "")
         data = event.get("data", {})
+        sub_id = data.get("id") or data.get("subscription_id")
+        logger.info("Webhook received event_type=%s subscription_id=%s", event_type, sub_id)
 
         if event_type == "transaction.completed":
             return self._handle_transaction_completed(data, db, UserProfile, UserSubscription, SubscriptionPlan)
 
         if event_type == "subscription.canceled":
-            sub_id = data.get("id")
             if sub_id:
                 sub = db.query(UserSubscription).filter(
                     UserSubscription.stripe_subscription_id == sub_id,
@@ -158,16 +159,23 @@ class PaddleProvider(PaymentProvider):
                     sub.auto_renew = False
                     db.query(UserProfile).filter(UserProfile.id == sub.user_id).update({"subscription_tier": "free"})
                     db.commit()
+                    logger.info("Subscription canceled user=%s sub=%s", sub.user_id, sub_id)
+                else:
+                    logger.warning("Subscription not found for cancel event sub=%s", sub_id)
             return {"status": "ok"}
 
         if event_type == "subscription.updated":
-            sub_id = data.get("id")
             if sub_id:
                 sub = db.query(UserSubscription).filter(
                     UserSubscription.stripe_subscription_id == sub_id,
                 ).first()
                 if sub:
-                    sub.status = data.get("status", sub.status)
+                    new_status = data.get("status")
+                    if sub.status == "canceled" and new_status == "active":
+                        logger.warning("Skipping canceled→active transition for sub=%s (requires new payment)", sub_id)
+                        return {"status": "skipped", "reason": "canceled_to_active"}
+                    if new_status:
+                        sub.status = new_status
                     period_end = data.get("current_billing_period", {}).get("ends_at")
                     if period_end:
                         sub.current_period_end = datetime.fromisoformat(period_end.replace("Z", "+00:00"))
@@ -175,6 +183,9 @@ class PaddleProvider(PaymentProvider):
                     if scheduled_change and scheduled_change.get("action") == "cancel":
                         sub.auto_renew = False
                     db.commit()
+                    logger.info("Subscription updated user=%s sub=%s status=%s", sub.user_id, sub_id, sub.status)
+                else:
+                    logger.warning("Subscription not found for update event sub=%s", sub_id)
             return {"status": "ok"}
 
         return {"status": "unhandled_event", "type": event_type}
@@ -225,6 +236,12 @@ class PaddleProvider(PaymentProvider):
         if not subscription_id:
             return {"status": "skipped", "reason": "no_subscription_id"}
 
+        # Check for duplicate transaction (idempotency)
+        from app.models.subscription import UserPayment
+        if db.query(UserPayment).filter(UserPayment.flow_order == transaction_id).first():
+            logger.info("Duplicate transaction skipped txn=%s", transaction_id)
+            return {"status": "already_processed"}
+
         # --- RECURRING PAYMENT: extend existing subscription ---
         existing_sub = db.query(UserSubscription).filter(
             UserSubscription.stripe_subscription_id == subscription_id,
@@ -246,7 +263,6 @@ class PaddleProvider(PaymentProvider):
             totals = data.get("details", {}).get("totals", {})
             amount_cents = int(totals.get("grand_total", 1499))
             if amount_cents > 0:
-                from app.models.subscription import UserPayment
                 prev_payments = db.query(UserPayment).filter(
                     UserPayment.subscription_id == existing_sub.id,
                 ).count()
@@ -271,6 +287,9 @@ class PaddleProvider(PaymentProvider):
                             amount=f"${amount_cents / 100:.2f}/month",
                             period=f"Next billing: {existing_sub.current_period_end.strftime('%B %d, %Y')}",
                         )
+
+            logger.info("Subscription renewed user=%s sub=%s amount_cents=%s txn=%s",
+                        existing_sub.user_id, subscription_id, amount_cents, transaction_id)
             db.commit()
             return {"status": "renewed", "subscription_id": subscription_id}
 
@@ -282,7 +301,9 @@ class PaddleProvider(PaymentProvider):
         if not user_id or not plan_slug:
             return {"status": "skipped", "reason": "missing_custom_data"}
 
+        # Idempotency: check if already processed
         if db.query(UserSubscription).filter(UserSubscription.stripe_session_id == transaction_id).first():
+            logger.info("Duplicate transaction skipped (new sub) txn=%s", transaction_id)
             return {"status": "already_processed"}
 
         plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.slug == plan_slug).first()
@@ -312,7 +333,6 @@ class PaddleProvider(PaymentProvider):
         totals = data.get("details", {}).get("totals", {})
         amount_cents = int(totals.get("grand_total", 0))
         if amount_cents > 0:
-            from app.models.subscription import UserPayment
             db.add(UserPayment(
                 user_id=user_id, subscription_id=new_sub.id,
                 amount_clp=amount_cents, currency="USD",
@@ -329,6 +349,8 @@ class PaddleProvider(PaymentProvider):
                     name=user.full_name or "there",
                 )
 
+        logger.info("Subscription created user=%s sub=%s plan=%s txn=%s amount_cents=%s",
+                    user_id, subscription_id, plan_slug, transaction_id, amount_cents)
         db.commit()
         return {"status": "ok"}
 
@@ -392,8 +414,10 @@ class PaddleProvider(PaymentProvider):
             except Exception:
                 logger.exception("Paddle cancel subscription failed")
 
+        sub.status = "cancel_at_period_end"
         sub.auto_renew = False
         db.commit()
+        logger.info("Subscription canceled user=%s sub=%s", user_id, sub.stripe_subscription_id)
         return {"status": "ok", "canceled_at_period_end": True}
 
     async def reactivate_subscription(self, user_id: str, db: DbSession, UserSubscription) -> dict:

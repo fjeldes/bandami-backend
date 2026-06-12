@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
@@ -7,8 +8,9 @@ from app.db.deps import get_db
 from app.models.exam import Exam, Evaluation
 from app.schemas.evaluation import EvaluationResponse, ExamCreate, ExamResponse
 from app.core.auth import get_current_user, get_user_plan_info, check_daily_limit, get_ai_provider, compute_feedback_unlocks_at
-from app.services.providers.base import ListeningEvaluator
+from app.services.providers.base import ListeningEvaluator, ProviderUnavailableError
 
+logger = logging.getLogger("ielts.listening")
 router = APIRouter()
 
 
@@ -59,9 +61,18 @@ async def evaluate_listening(submission: ListeningSubmission, user_id: str = Dep
         ev = Evaluation(exam_id=exam.id, user_submission=str(submission.answers), overall_band=result.overall_band, criteria_scores=result.criteria_scores, general_feedback=result.general_feedback, detailed_feedback=result.detailed_feedback, grammar_corrections=result.grammar_corrections, provider_used=provider.provider_name, ai_model_used=result.model, tokens_used=result.tokens, processing_time_ms=result.processing_time_ms, feedback_unlocks_at=unlocks_at)
         db.add(ev); exam.status = "completed"; exam.completed_at = datetime.now(timezone.utc); db.commit(); db.refresh(ev)
         return EvaluationResponse(id=str(ev.id), exam_id=str(ev.exam_id), user_submission=str(submission.answers), overall_band=ev.overall_band, criteria_scores=ev.criteria_scores if is_visible else {}, general_feedback=result.general_feedback or "", detailed_feedback=result.detailed_feedback if is_visible else None, grammar_corrections=[], provider_used=provider.provider_name, ai_model_used=result.model, tokens_used=result.tokens, processing_time_ms=result.processing_time_ms, feedback_unlocks_at=unlocks_at, is_feedback_visible=is_visible, created_at=ev.created_at)
+    except ProviderUnavailableError as e:
+        logger.warning("Provider unavailable: %s", e)
+        exam.status = "pending"; db.commit()
+        raise HTTPException(
+            status_code=503,
+            detail="Our AI agent is currently experiencing high demand. Please try again later.",
+        )
+
     except Exception as e:
+        logger.exception("Evaluation failed for exam=%s user=%s", exam.id, user_id)
         exam.status = "failed"; db.commit()
-        raise HTTPException(status_code=500, detail=f"Evaluation failed: {str(e)[:200]}")
+        raise HTTPException(status_code=500, detail="Evaluation failed. Please try again.")
 
 
 @router.get("/{exam_id}/evaluation", response_model=EvaluationResponse)

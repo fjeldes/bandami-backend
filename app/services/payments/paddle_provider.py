@@ -8,13 +8,12 @@ from sqlalchemy.orm import Session as DbSession
 
 from app.core.config import get_settings
 from app.services.payments.base import PaymentProvider, SubscriptionInfo
+from app.services.email_service import send_trial_welcome_email, send_purchase_confirmation
 
 logger = logging.getLogger(__name__)
 
 
 class PaddleProvider(PaymentProvider):
-
-    DISCOUNT_ID = "dsc_01ktwffxceyd4npja9cqy3s28p"
 
     @property
     def provider_name(self) -> str:
@@ -102,9 +101,6 @@ class PaddleProvider(PaymentProvider):
                 },
             },
         }
-
-        if plan_slug == "premium":
-            body["discount_id"] = self.DISCOUNT_ID
 
         data = await self._post("/transactions", body)
         return {
@@ -209,6 +205,8 @@ class PaddleProvider(PaymentProvider):
             return {"status": "error", "message": "Transaction does not match user"}
 
         if not txn_plan_slug:
+            if custom_data.get("purpose") == "payment_method_update":
+                return {"status": "ok", "note": "payment_method_updated"}
             return {"status": "error", "message": "Missing plan in transaction"}
 
         self._handle_transaction_completed(txn, db, UserProfile, UserSubscription, SubscriptionPlan)
@@ -233,20 +231,46 @@ class PaddleProvider(PaymentProvider):
         ).first()
 
         if existing_sub:
+            custom_data = data.get("custom_data", {}) or {}
+            if custom_data.get("purpose") == "payment_method_update":
+                return {"status": "skipped", "reason": "payment_method_update"}
+
             now = datetime.now(timezone.utc)
-            existing_sub.current_period_end = now + timedelta(days=30)
+            period_end = data.get("billing_period", {}).get("ends_at")
+            existing_sub.current_period_end = (
+                datetime.fromisoformat(period_end.replace("Z", "+00:00"))
+                if period_end else now + timedelta(days=30)
+            )
             db.flush()
 
             totals = data.get("details", {}).get("totals", {})
             amount_cents = int(totals.get("grand_total", 1499))
-            from app.models.subscription import UserPayment
-            db.add(UserPayment(
-                user_id=str(existing_sub.user_id), subscription_id=existing_sub.id,
-                amount_clp=amount_cents, currency="USD",
-                flow_order=transaction_id, flow_invoice_id=transaction_id,
-                period_start=now, period_end=now + timedelta(days=30),
-                payment_type="recurring",
-            ))
+            if amount_cents > 0:
+                from app.models.subscription import UserPayment
+                prev_payments = db.query(UserPayment).filter(
+                    UserPayment.subscription_id == existing_sub.id,
+                ).count()
+                is_first_charge = prev_payments == 0
+
+                db.add(UserPayment(
+                    user_id=str(existing_sub.user_id), subscription_id=existing_sub.id,
+                    amount_clp=amount_cents, currency="USD",
+                    flow_order=transaction_id, flow_invoice_id=transaction_id,
+                    period_start=now, period_end=existing_sub.current_period_end,
+                    payment_type="recurring",
+                ))
+                db.flush()
+
+                if is_first_charge:
+                    user = db.query(UserProfile).filter(UserProfile.id == existing_sub.user_id).first()
+                    if user and user.email:
+                        send_purchase_confirmation(
+                            to_email=user.email,
+                            name=user.full_name or "there",
+                            plan_name="Pro Monthly",
+                            amount=f"${amount_cents / 100:.2f}/month",
+                            period=f"Next billing: {existing_sub.current_period_end.strftime('%B %d, %Y')}",
+                        )
             db.commit()
             return {"status": "renewed", "subscription_id": subscription_id}
 
@@ -266,11 +290,15 @@ class PaddleProvider(PaymentProvider):
             return {"status": "skipped"}
 
         now = datetime.now(timezone.utc)
-        days = 30 if plan_slug == "premium" else 7
+        period_end = data.get("billing_period", {}).get("ends_at")
+        current_period_end = (
+            datetime.fromisoformat(period_end.replace("Z", "+00:00"))
+            if period_end else now + timedelta(days=30)
+        )
 
         new_sub = UserSubscription(
             id=str(uuid4()), user_id=user_id, plan_id=str(plan.id),
-            status="active", current_period_start=now, current_period_end=now + timedelta(days=days),
+            status="active", current_period_start=now, current_period_end=current_period_end,
             stripe_subscription_id=subscription_id, stripe_session_id=transaction_id,
         )
         db.add(new_sub)
@@ -282,15 +310,25 @@ class PaddleProvider(PaymentProvider):
         db.flush()
 
         totals = data.get("details", {}).get("totals", {})
-        amount_cents = int(totals.get("grand_total", 299))
-        from app.models.subscription import UserPayment
-        db.add(UserPayment(
-            user_id=user_id, subscription_id=new_sub.id,
-            amount_clp=amount_cents, currency="USD",
-            flow_order=transaction_id, flow_invoice_id=transaction_id,
-            period_start=now, period_end=now + timedelta(days=days),
-            payment_type="first_charge",
-        ))
+        amount_cents = int(totals.get("grand_total", 0))
+        if amount_cents > 0:
+            from app.models.subscription import UserPayment
+            db.add(UserPayment(
+                user_id=user_id, subscription_id=new_sub.id,
+                amount_clp=amount_cents, currency="USD",
+                flow_order=transaction_id, flow_invoice_id=transaction_id,
+                period_start=now, period_end=current_period_end,
+                payment_type="first_charge",
+            ))
+
+        if amount_cents == 0:
+            user = db.query(UserProfile).filter(UserProfile.id == user_id).first()
+            if user and user.email:
+                send_trial_welcome_email(
+                    to_email=user.email,
+                    name=user.full_name or "there",
+                )
+
         db.commit()
         return {"status": "ok"}
 
@@ -299,7 +337,7 @@ class PaddleProvider(PaymentProvider):
     async def get_subscription(self, user_id: str, db: DbSession, UserSubscription) -> SubscriptionInfo:
         sub = db.query(UserSubscription).filter(
             UserSubscription.user_id == user_id,
-            UserSubscription.status.in_(["active", "past_due"]),
+            UserSubscription.status.in_(["active", "past_due", "trialing"]),
         ).order_by(UserSubscription.current_period_end.desc()).first()
 
         if not sub:
@@ -341,7 +379,7 @@ class PaddleProvider(PaymentProvider):
     async def cancel_subscription(self, user_id: str, db: DbSession, UserSubscription) -> dict:
         sub = db.query(UserSubscription).filter(
             UserSubscription.user_id == user_id,
-            UserSubscription.status.in_(["active", "past_due"]),
+            UserSubscription.status.in_(["active", "past_due", "trialing"]),
         ).first()
         if not sub:
             raise ValueError("No active subscription found")
@@ -387,7 +425,7 @@ class PaddleProvider(PaymentProvider):
 
         sub = db.query(UserSubscription).filter(
             UserSubscription.user_id == user_id,
-            UserSubscription.status.in_(["active", "past_due"]),
+            UserSubscription.status.in_(["active", "past_due", "trialing"]),
         ).order_by(UserSubscription.current_period_end.desc()).first()
 
         if not sub:
@@ -428,6 +466,29 @@ class PaddleProvider(PaymentProvider):
 
     async def create_portal(self, user_id: str, db: DbSession, UserProfile) -> dict:
         s = get_settings()
+
+        sub = db.query(UserSubscription).filter(
+            UserSubscription.user_id == user_id,
+            UserSubscription.status.in_(["active", "past_due", "trialing"]),
+            UserSubscription.stripe_subscription_id.isnot(None),
+        ).order_by(UserSubscription.current_period_end.desc()).first()
+
+        if sub and sub.stripe_subscription_id:
+            try:
+                data = await self._post(
+                    f"/subscriptions/{sub.stripe_subscription_id}/update-payment-method-transaction",
+                    {
+                        "custom_data": {
+                            "user_id": user_id,
+                            "purpose": "payment_method_update",
+                        },
+                    },
+                )
+                txn_id = data["data"]["id"]
+                return {"transaction_id": txn_id}
+            except Exception:
+                logger.exception("Failed to create Paddle payment method update transaction")
+
         return {"url": f"{s.frontend_url}/settings"}
 
     async def get_invoices(self, user_id: str, db: DbSession, UserProfile) -> list[dict]:

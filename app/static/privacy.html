@@ -19,7 +19,7 @@
 <body>
 
 <h1>Privacy Policy</h1>
-<p class="updated">Last updated: May 31, 2026</p>
+<p class="updated">Last updated: June 11, 2026</p>
 
 <p>
   At Bandami, we take your privacy seriously. This Privacy Policy explains what personal data we collect, how we use it, who we share it with, and your rights regarding your data when you use our IELTS preparation service.
@@ -38,7 +38,7 @@
   <tr><td>Account data</td><td>Email address, full name, password (hashed with bcrypt)</td><td>Account creation, authentication, communication</td></tr>
   <tr><td>Profile data</td><td>Subscription tier, avatar URL (if provided)</td><td>Service personalization, plan management</td></tr>
   <tr><td>Submitted content</td><td>Writing essays (text), speaking audio recordings, transcriptions</td><td>AI evaluation and feedback generation</td></tr>
-  <tr><td>Payment data</td><td>Stripe customer ID (we do not store credit card numbers)</td><td>Subscription and credit pack purchases</td></tr>
+  <tr><td>Payment data</td><td>Paddle customer/transaction ID (we do not store payment card numbers)</td><td>Subscription management and billing</td></tr>
   <tr><td>Google OAuth data</td><td>Name, email, Google ID (if you sign in with Google)</td><td>Authentication</td></tr>
   <tr><td>Communications</td><td>Emails and messages sent to our support</td><td>Customer support</td></tr>
 </table>
@@ -46,7 +46,7 @@
 <h3>2.2 Information Collected Automatically</h3>
 <table>
   <tr><th>Category</th><th>Examples</th><th>Purpose</th></tr>
-  <tr><td>Usage data</td><td>Number of evaluations, exam types, scores, time spent</td><td>Service analytics, daily limit enforcement, dashboard stats</td></tr>
+  <tr><td>Usage data</td><td>Number of evaluations, exam types, scores, time spent</td><td>Service analytics, usage tracking, dashboard stats</td></tr>
   <tr><td>Technical data</td><td>IP address (used for rate limiting only, not stored long-term), browser type, device info, timestamps</td><td>Security, rate limiting, debugging</td></tr>
   <tr><td>AI processing metadata</td><td>AI model used, tokens consumed, processing duration</td><td>Service optimization, cost tracking</td></tr>
 </table>
@@ -56,9 +56,9 @@
 <ul>
   <li><strong>Providing the Service:</strong> Creating and managing your account, authenticating you, processing your submissions through AI models, and delivering evaluations and feedback.</li>
   <li><strong>Communication:</strong> Sending verification emails, password reset links, service announcements, and responding to support inquiries.</li>
-  <li><strong>Billing:</strong> Processing payments through Stripe, managing subscriptions and credit packs.</li>
+  <li><strong>Billing:</strong> Processing payments through Paddle, managing subscriptions and billing.</li>
   <li><strong>Improvement:</strong> Analyzing usage patterns to improve our AI prompts, Service performance, and user experience. We do NOT use your submitted essays or recordings to train AI models unless you explicitly opt in.</li>
-  <li><strong>Security:</strong> Rate limiting, fraud prevention, enforcing daily evaluation limits, and protecting against unauthorized access.</li>
+  <li><strong>Security:</strong> Rate limiting, fraud prevention, monthly usage tracking, and protecting against unauthorized access.</li>
   <li><strong>Legal compliance:</strong> Meeting applicable legal obligations and responding to lawful requests.</li>
 </ul>
 
@@ -77,7 +77,8 @@
 <h3>5.1 AI Providers</h3>
 <table>
   <tr><th>Provider</th><th>Data Shared</th><th>Purpose</th><th>Privacy Policy</th></tr>
-  <tr><td>AI Providers</td><td>Writing essays, speaking transcriptions</td><td>Evaluation and feedback generation</td><td>Data processed per provider policies</td></tr>
+  <tr><td>Google (Gemini)</td><td>Writing essays, speaking transcriptions</td><td>AI evaluation and feedback generation</td><td><a href="https://policies.google.com/privacy">Google Privacy Policy</a></td></tr>
+  <tr><td>OpenAI (GPT)</td><td>Writing essays, speaking transcriptions</td><td>AI evaluation and feedback generation</td><td><a href="https://openai.com/privacy/">OpenAI Privacy Policy</a></td></tr>
 </table>
 <p>
   <strong>Important:</strong> Per Google's and OpenAI's data usage policies, data submitted through their APIs is not used to train or improve their models. Your essays and recordings are processed ephemerally and are not retained by these providers beyond the processing period.
@@ -85,9 +86,9 @@
 
 <h3>5.2 Infrastructure and Service Providers</h3>
 <ul>
-  <li><strong>Stripe, Inc.</strong> — Payment processing. We share your user ID, email, and plan selection. Stripe processes and stores your payment method. <a href="https://stripe.com/privacy">Stripe Privacy Policy</a>.</li>
+  <li><strong>Paddle.com Ltd.</strong> — Payment processing (Merchant of Record). We share your user ID, email, and plan selection. Paddle processes and stores your payment method. <a href="https://www.paddle.com/legal/privacy">Paddle Privacy Policy</a>.</li>
   <li><strong>Brevo (Sendinblue SAS)</strong> — Transactional email delivery (verification emails, password reset). We share your email address and name. <a href="https://www.brevo.com/legal/privacypolicy/">Brevo Privacy Policy</a>.</li>
-  <li><strong>Supabase (if used)</strong> — PostgreSQL database hosting. All database data is stored on Supabase's infrastructure. <a href="https://supabase.com/privacy">Supabase Privacy Policy</a>.</li>
+  <li><strong>Google Cloud (Cloud SQL)</strong> — PostgreSQL database hosting. All database data is stored on Google Cloud's infrastructure. <a href="https://policies.google.com/privacy">Google Privacy Policy</a>.</li>
 </ul>
 
 <h3>5.3 Other Disclosures</h3>
@@ -156,7 +157,7 @@
 
 <h2>11. International Data Transfers</h2>
 <p>
-  Your data may be processed in countries other than your country of residence, including the United States (where OpenAI, Google, and Stripe servers are located), Chile (where Bandami is based), and the European Union (where Brevo servers are located).
+  Your data may be processed in countries other than your country of residence, including the United States (where OpenAI, Google, and Google Cloud servers are located), the United Kingdom (where Paddle servers are located), Chile (where Bandami is based), and the European Union (where Brevo servers are located).
 </p>
 <p>
   When we transfer data internationally, we rely on appropriate safeguards such as Standard Contractual Clauses or rely on the service provider's certification under applicable data protection frameworks (e.g., EU-US Data Privacy Framework, where applicable).

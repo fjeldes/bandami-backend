@@ -52,7 +52,7 @@ def _calc_plan_info(db: Session, user_id: str) -> dict:
         db.query(UserSubscription)
         .filter(
             UserSubscription.user_id == user_id,
-            UserSubscription.status == "active",
+            UserSubscription.status.in_(["active", "trialing"]),
             UserSubscription.current_period_end > now,
         )
         .order_by(UserSubscription.current_period_end.desc())
@@ -67,7 +67,6 @@ def _calc_plan_info(db: Session, user_id: str) -> dict:
         return {
             "tier": "premium",
             "provider": provider,
-            "daily_eval_limit": 30,
             "feedback_delay_hours": 0,
             "referral_discounts": user.referral_discounts if user else 0,
             "is_admin": False,
@@ -76,7 +75,6 @@ def _calc_plan_info(db: Session, user_id: str) -> dict:
     return {
         "tier": "free",
         "provider": "gemini",
-        "daily_eval_limit": 3,
         "feedback_delay_hours": 0,
         "referral_discounts": user.referral_discounts if user else 0,
         "is_admin": False,
@@ -95,28 +93,29 @@ async def check_daily_limit(
     db: Session = Depends(get_db),
     user_plan: dict = Depends(get_user_plan_info),
 ) -> dict:
-    from app.core.config import get_settings
-    settings = get_settings()
-
     if user_plan.get("is_admin"):
-        user_plan["eval_source"] = "daily"
-        user_plan["daily_used"] = 0
+        user_plan["eval_source"] = "admin"
         return user_plan
 
-    used = db.scalar(
-        text("SELECT COUNT(*) FROM exams WHERE user_id = :uid AND created_at::date = CURRENT_DATE AND eval_source = 'daily' AND status NOT IN ('pending', 'failed')"),
-        {"uid": user_id},
-    ) or 0
-    limit = user_plan["daily_eval_limit"]
+    now = datetime.now(timezone.utc)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-    if used >= limit:
-        raise HTTPException(
-            status_code=402,
-            detail=f"Daily limit reached ({used}/{limit}). Upgrade to Pro for unlimited practice.",
-        )
+    if user_plan.get("tier") == "premium":
+        used = db.scalar(
+            text("SELECT COUNT(*) FROM exams WHERE user_id = :uid AND created_at >= :month_start AND eval_source = 'pro_monthly' AND status NOT IN ('pending', 'failed')"),
+            {"uid": user_id, "month_start": month_start},
+        ) or 0
 
-    user_plan["eval_source"] = "daily"
-    user_plan["daily_used"] = used
+        if used < 30:
+            user_plan["eval_source"] = "pro_monthly"
+            return user_plan
+
+        user_plan["tier"] = "free"
+        user_plan["provider"] = "gemini"
+        user_plan["eval_source"] = "free"
+        return user_plan
+
+    user_plan["eval_source"] = "free"
     return user_plan
 
 

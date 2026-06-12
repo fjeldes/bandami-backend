@@ -63,6 +63,7 @@ async def evaluate_reading(
     is_visible = plan_info.get("tier", "free") == "premium" or plan_info.get("is_admin", False)
 
     exam.status = "processing"
+    exam.eval_source = plan_info.get("eval_source", "free")
     db.commit()
 
     try:

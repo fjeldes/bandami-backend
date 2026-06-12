@@ -112,7 +112,7 @@ async def evaluate_speaking_endpoint(
     is_visible = plan_info.get("tier", "free") == "premium" or plan_info.get("is_admin", False)
 
     exam.status = "processing"
-    exam.eval_source = plan_info.get("eval_source", "daily")
+    exam.eval_source = plan_info.get("eval_source", "free")
     db.commit()
 
     try:

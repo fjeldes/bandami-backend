@@ -48,7 +48,7 @@ async def create_checkout(
     now = datetime.now(timezone.utc)
     active = db.query(UserSubscription).filter(
         UserSubscription.user_id == user_id,
-        UserSubscription.status == "active",
+        UserSubscription.status.in_(["active", "trialing"]),
         UserSubscription.current_period_end > now,
     ).first()
     if active:

@@ -10,7 +10,7 @@ ExamStatus = Literal["pending", "processing", "completed", "failed"]
 WritingTask = Literal["task1", "task2"]
 AIProvider = Literal["gemini", "openai"]
 SubscriptionTier = Literal["free", "premium"]
-EvalSource = Literal["daily", "credit_pack"]
+EvalSource = Literal["daily", "credit_pack", "pro_monthly", "free"]
 
 
 # ---- User ----

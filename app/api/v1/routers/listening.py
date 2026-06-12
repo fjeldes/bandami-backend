@@ -52,7 +52,7 @@ async def evaluate_listening(submission: ListeningSubmission, user_id: str = Dep
     delay_hours = plan_info.get("feedback_delay_hours", 0)
     unlocks_at = compute_feedback_unlocks_at(delay_hours)
     is_visible = plan_info.get("tier", "free") == "premium" or plan_info.get("is_admin", False)
-    exam.status = "processing"; db.commit()
+    exam.status = "processing"; exam.eval_source = plan_info.get("eval_source", "free"); db.commit()
 
     try:
         result = await provider.evaluate_listening(submission.answers, detailed=not is_free)

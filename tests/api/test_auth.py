@@ -185,17 +185,21 @@ class TestProtectedRoutes:
 
 
 class TestCORS:
-    def test_cors_headers_present(self, client):
-        """Login must return CORS headers or requests from the frontend will be blocked."""
+    # Default CORS config allows http://localhost:3000. Production overrides via env.
+    KNOWN = "http://localhost:3000"
+    UNKNOWN = "https://evil.com"
+
+    def test_cors_preflight_allows_known_origin(self, client):
+        """OPTIONS preflight with a known origin must return 200 + CORS headers."""
         res = client.options(
             "/api/v1/auth/login",
-            headers={"Origin": "https://dev.bandami.com", "Access-Control-Request-Method": "POST"},
+            headers={"Origin": self.KNOWN, "Access-Control-Request-Method": "POST"},
         )
         assert res.status_code == 200
-        assert res.headers.get("access-control-allow-origin") is not None
+        assert res.headers.get("access-control-allow-origin") == self.KNOWN
 
-    def test_cors_login_allows_known_origin(self, client, db_session):
-        """A real POST from the frontend origin must succeed."""
+    def test_cors_post_allows_known_origin(self, client, db_session):
+        """A POST with the allowed origin must include access-control-allow-origin."""
         from app.models.user import UserProfile
         from datetime import datetime, timezone
         from app.core.security import hash_password
@@ -212,16 +216,16 @@ class TestCORS:
         res = client.post(
             "/api/v1/auth/login",
             json={"email": "cors@bandami.com", "password": "CorsPass1!"},
-            headers={"Origin": "https://dev.bandami.com"},
+            headers={"Origin": self.KNOWN},
         )
         assert res.status_code == 200
-        assert res.headers.get("access-control-allow-origin") == "https://dev.bandami.com"
+        assert res.headers.get("access-control-allow-origin") == self.KNOWN
 
     def test_cors_rejects_unknown_origin(self, client):
-        """An unknown origin must not receive a valid Access-Control-Allow-Origin."""
+        """An unknown origin must NOT be mirrored back in Access-Control-Allow-Origin."""
         res = client.options(
             "/api/v1/auth/login",
-            headers={"Origin": "https://evil.com", "Access-Control-Request-Method": "POST"},
+            headers={"Origin": self.UNKNOWN, "Access-Control-Request-Method": "POST"},
         )
         allow = res.headers.get("access-control-allow-origin")
-        assert allow != "https://evil.com"
+        assert allow != self.UNKNOWN

@@ -182,3 +182,46 @@ class TestProtectedRoutes:
         assert res.status_code == 200
         assert "exams" in res.json()
         assert isinstance(res.json()["exams"], list)
+
+
+class TestCORS:
+    def test_cors_headers_present(self, client):
+        """Login must return CORS headers or requests from the frontend will be blocked."""
+        res = client.options(
+            "/api/v1/auth/login",
+            headers={"Origin": "https://dev.bandami.com", "Access-Control-Request-Method": "POST"},
+        )
+        assert res.status_code == 200
+        assert res.headers.get("access-control-allow-origin") is not None
+
+    def test_cors_login_allows_known_origin(self, client, db_session):
+        """A real POST from the frontend origin must succeed."""
+        from app.models.user import UserProfile
+        from datetime import datetime, timezone
+        from app.core.security import hash_password
+        import uuid
+
+        uid = str(uuid.uuid4())
+        db_session.add(UserProfile(
+            id=uid, email="cors@bandami.com",
+            hashed_password=hash_password("CorsPass1!"),
+            email_confirmed_at=datetime.now(timezone.utc),
+        ))
+        db_session.commit()
+
+        res = client.post(
+            "/api/v1/auth/login",
+            json={"email": "cors@bandami.com", "password": "CorsPass1!"},
+            headers={"Origin": "https://dev.bandami.com"},
+        )
+        assert res.status_code == 200
+        assert res.headers.get("access-control-allow-origin") == "https://dev.bandami.com"
+
+    def test_cors_rejects_unknown_origin(self, client):
+        """An unknown origin must not receive a valid Access-Control-Allow-Origin."""
+        res = client.options(
+            "/api/v1/auth/login",
+            headers={"Origin": "https://evil.com", "Access-Control-Request-Method": "POST"},
+        )
+        allow = res.headers.get("access-control-allow-origin")
+        assert allow != "https://evil.com"

@@ -1,11 +1,6 @@
 -- Migration: Add analytics columns and fix dashboard view
 -- Date: 2026-06-11
 
--- Fix eval_type_enum — must be done BEFORE any inserts with new values
-ALTER TYPE eval_type_enum ADD VALUE IF NOT EXISTS 'free';
-ALTER TYPE eval_type_enum ADD VALUE IF NOT EXISTS 'pro_monthly';
-ALTER TYPE eval_type_enum ADD VALUE IF NOT EXISTS 'admin';
-
 -- Add columns for usage analytics
 ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS upgraded_at TIMESTAMPTZ;
 ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMPTZ;

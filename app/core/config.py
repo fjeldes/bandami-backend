@@ -1,6 +1,7 @@
 from pydantic_settings import BaseSettings
-from pydantic import model_validator
+from pydantic import model_validator, field_validator
 from functools import lru_cache
+import json
 
 
 class Settings(BaseSettings):
@@ -49,6 +50,13 @@ class Settings(BaseSettings):
     environment: str = "production"
     debug: bool = False
     cors_origins: list[str] = ["http://localhost:3000"]
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v):
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
 
     default_free_daily_limit: int = 4
     default_premium_daily_limit: int = 30

@@ -325,6 +325,9 @@ class PaddleProvider(PaymentProvider):
         db.add(new_sub)
 
         update = {"subscription_tier": "premium"}
+        user = db.query(UserProfile).filter(UserProfile.id == user_id).first()
+        if user and not user.upgraded_at:
+            update["upgraded_at"] = now
         if customer_id:
             update["stripe_customer_id"] = customer_id
         db.query(UserProfile).filter(UserProfile.id == user_id).update(update)

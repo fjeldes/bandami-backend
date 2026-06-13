@@ -209,7 +209,12 @@ async def login(
 
     _store_refresh_token(db, str(user.id), refresh_token)
 
-    logger.info("Login success uid=%s email=%s", user.id, user.email)
+    # Update last_active_at
+    now = datetime.now(timezone.utc)
+    db.query(UserProfile).filter(UserProfile.id == user.id).update({UserProfile.last_active_at: now})
+    db.commit()
+
+    logger.info("Login success uid=%s email=%s tier=%s", user.id, user.email, _user_response(user, db)["subscription_tier"])
     return AuthResponse(
         access_token=access_token,
         refresh_token=refresh_token,

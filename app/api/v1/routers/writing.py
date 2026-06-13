@@ -125,6 +125,14 @@ async def evaluate_writing_endpoint(
         db.commit()
         db.refresh(ev)
 
+        # Update last_active_at
+        from app.models.user import UserProfile
+        db.query(UserProfile).filter(UserProfile.id == user_id).update({UserProfile.last_active_at: datetime.now(timezone.utc)})
+        db.commit()
+
+        logger.info("Evaluation completed exam=%s user=%s tier=%s eval_source=%s band=%s",
+                    exam.id, user_id, plan_info.get("tier"), plan_info.get("eval_source"), ev.overall_band)
+
         return EvaluationResponse(
             id=str(ev.id),
             exam_id=str(ev.exam_id),
@@ -144,7 +152,7 @@ async def evaluate_writing_endpoint(
         )
 
     except ProviderUnavailableError as e:
-        logger.warning(f"Provider unavailable: {e}")
+        logger.warning("Provider unavailable: %s tier=%s eval_source=%s", e, plan_info.get("tier"), plan_info.get("eval_source"))
         exam.status = "pending"
         db.commit()
         raise HTTPException(
@@ -153,7 +161,7 @@ async def evaluate_writing_endpoint(
         )
 
     except Exception as e:
-        logger.exception("Evaluation failed for exam=%s user=%s", exam.id, user_id)
+        logger.exception("Evaluation failed for exam=%s user=%s tier=%s eval_source=%s", exam.id, user_id, plan_info.get("tier"), plan_info.get("eval_source"))
         exam.status = "failed"
         db.commit()
         raise HTTPException(status_code=500, detail="Evaluation failed. Please try again.")

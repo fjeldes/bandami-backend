@@ -34,6 +34,8 @@ class UserProfile(Base):
     referral_code = Column(String, unique=True, nullable=True)
     referred_by = Column(String, nullable=True)
     referral_discounts = Column(Integer, nullable=False, default=0)
+    upgraded_at = Column(DateTime(timezone=True), nullable=True)
+    last_active_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=_now, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
 

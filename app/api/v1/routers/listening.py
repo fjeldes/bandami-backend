@@ -60,9 +60,11 @@ async def evaluate_listening(submission: ListeningSubmission, user_id: str = Dep
         result = await provider.evaluate_listening(submission.answers, detailed=not is_free)
         ev = Evaluation(exam_id=exam.id, user_submission=str(submission.answers), overall_band=result.overall_band, criteria_scores=result.criteria_scores, general_feedback=result.general_feedback, detailed_feedback=result.detailed_feedback, grammar_corrections=result.grammar_corrections, provider_used=provider.provider_name, ai_model_used=result.model, tokens_used=result.tokens, processing_time_ms=result.processing_time_ms, feedback_unlocks_at=unlocks_at)
         db.add(ev); exam.status = "completed"; exam.completed_at = datetime.now(timezone.utc); db.commit(); db.refresh(ev)
+        from app.models.user import UserProfile; db.query(UserProfile).filter(UserProfile.id == user_id).update({UserProfile.last_active_at: datetime.now(timezone.utc)}); db.commit()
+        logger.info("Evaluation completed exam=%s user=%s tier=%s eval_source=%s band=%s", exam.id, user_id, plan_info.get("tier"), plan_info.get("eval_source"), ev.overall_band)
         return EvaluationResponse(id=str(ev.id), exam_id=str(ev.exam_id), user_submission=str(submission.answers), overall_band=ev.overall_band, criteria_scores=ev.criteria_scores if is_visible else {}, general_feedback=result.general_feedback or "", detailed_feedback=result.detailed_feedback if is_visible else None, grammar_corrections=[], provider_used=provider.provider_name, ai_model_used=result.model, tokens_used=result.tokens, processing_time_ms=result.processing_time_ms, feedback_unlocks_at=unlocks_at, is_feedback_visible=is_visible, created_at=ev.created_at)
     except ProviderUnavailableError as e:
-        logger.warning("Provider unavailable: %s", e)
+        logger.warning("Provider unavailable: %s tier=%s eval_source=%s", e, plan_info.get("tier"), plan_info.get("eval_source"))
         exam.status = "pending"; db.commit()
         raise HTTPException(
             status_code=503,
@@ -70,7 +72,7 @@ async def evaluate_listening(submission: ListeningSubmission, user_id: str = Dep
         )
 
     except Exception as e:
-        logger.exception("Evaluation failed for exam=%s user=%s", exam.id, user_id)
+        logger.exception("Evaluation failed for exam=%s user=%s tier=%s eval_source=%s", exam.id, user_id, plan_info.get("tier"), plan_info.get("eval_source"))
         exam.status = "failed"; db.commit()
         raise HTTPException(status_code=500, detail="Evaluation failed. Please try again.")
 

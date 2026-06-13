@@ -39,7 +39,7 @@ EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 DO $$ BEGIN
-    CREATE TYPE eval_type_enum       AS ENUM ('daily', 'credit_pack');
+    CREATE TYPE eval_type_enum       AS ENUM ('daily', 'credit_pack', 'free', 'pro_monthly', 'admin');
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 

@@ -470,6 +470,7 @@ async def get_questions(
     exam_type: str = None,
     task_type: str = None,
     difficulty: int = None,
+    module: str = None,
     user_id: str = Depends(get_current_user),
     db: Session = Depends(get_db),
     plan_info: dict = Depends(get_user_plan_info),
@@ -494,6 +495,8 @@ async def get_questions(
         query = query.filter(Question.task_type == task_type)
     if difficulty:
         query = query.filter(Question.difficulty == difficulty)
+    if module:
+        query = query.filter(Question.module == module)
 
     questions = query.order_by(Question.difficulty).all()
     return [{

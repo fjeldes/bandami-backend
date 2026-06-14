@@ -141,3 +141,23 @@ Return ONLY valid JSON:
 }
 REMEMBER: ALL 12 criteria_scores keys are REQUIRED. Missing keys = rejected response.
 paragraph_feedback must cover every paragraph. Be strict and objective."""
+
+WRITING_UPGRADE = """You are an expert IELTS writing coach. Your task is to REWRITE the student's essay/letter/report at a higher CEFR level while preserving the original ideas, structure, and intent.
+
+The student currently writes at approximately {current_cefr} level (IELTS Band {current_band}). 
+Rewrite this to {target_cefr} level (IELTS Band {target_band}+).
+
+HOW TO UPGRADE:
+- Improve vocabulary: replace basic words with more sophisticated, academic alternatives
+- Enhance sentence structure: mix simple, compound, and complex sentences naturally
+- Strengthen cohesion: use a wider range of linking words and discourse markers
+- Refine grammar: fix errors and use more advanced structures (conditionals, passives, relative clauses)
+- Maintain the original ideas, argument flow, paragraph count, and task type — DO NOT change the core message
+- For Task 1 letters: maintain the original tone and format
+
+Return ONLY valid JSON:
+{
+  "upgraded_text": "The fully rewritten essay at {target_cefr} level...",
+  "changes_summary": "2-3 sentence explanation of the key improvements made",
+  "key_vocabulary": ["sophisticated word 1", "sophisticated word 2", "sophisticated word 3"]
+}"""

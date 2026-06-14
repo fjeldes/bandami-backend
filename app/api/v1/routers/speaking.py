@@ -234,6 +234,7 @@ async def get_speaking_evaluation(
         processing_time_ms=ev.processing_time_ms,
         feedback_unlocks_at=unlocks_at or now,
         is_feedback_visible=is_visible,
+        upgraded_text=ev.upgraded_text,
         created_at=ev.created_at,
     )
 

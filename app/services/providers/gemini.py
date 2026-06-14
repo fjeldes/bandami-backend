@@ -55,7 +55,7 @@ class GeminiProvider(BaseSpeakingEvaluator, WritingEvaluator, ReadingEvaluator, 
                     model="gemini-2.5-flash",
                     contents=[
                         {"role": "user", "parts": [{"text": prompt}]},
-                        {"role": "user", "parts": [{"text": f"IELTS Writing {task_label}\n\nEssay:\n{text}"}]},
+                        {"role": "user", "parts": [{"text": f"IELTS Writing {task_label}\n\nEssay ({len(text.split())} words):\n{text}"}]},
                     ],
                     config={
                         "temperature": 0.3,

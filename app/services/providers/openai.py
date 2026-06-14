@@ -52,7 +52,7 @@ class OpenAIProvider(BaseSpeakingEvaluator, WritingEvaluator, ReadingEvaluator, 
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": prompt},
-                {"role": "user", "content": f"IELTS Writing {task_label}\n\nEssay:\n{text}"},
+                {"role": "user", "content": f"IELTS Writing {task_label}\n\nEssay ({len(text.split())} words):\n{text}"},
             ],
             temperature=0.3,
             response_format={"type": "json_object"},

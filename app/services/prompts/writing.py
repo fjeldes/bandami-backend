@@ -94,7 +94,7 @@ IDENTIFY THE TASK TYPE first, then evaluate accordingly:
 
 MAIN CRITERIA + SUB-CRITERIA:
 1. task_response (TR):
-   - task_fulfillment: Does the candidate fully address all parts of the task? Word count adequacy?
+   - task_fulfillment: Does the candidate fully address all parts of the task? (Task 1 = 150 words min, Task 2 = 250 words min. The word count is provided — use it objectively.)
    - position_clarity: How clear is the main position/thesis? For Task 1, how well is the overview presented?
 2. coherence_and_cohesion (CC):
    - paragraph_structure: Logical paragraph division, clear topic sentences, progression of ideas

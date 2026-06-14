@@ -277,7 +277,7 @@ async def upgrade_writing(
 
     try:
         response = await provider._call_ai(prompt, ev.user_submission, max_tokens=4096, temperature=0.4)
-        result = json.loads(response)
+        result = provider._parse_response(response)
     except Exception as e:
         logger.exception("Upgrade failed for exam=%s user=%s", exam_id, user_id)
         raise HTTPException(status_code=500, detail="Upgrade failed. Please try again.")

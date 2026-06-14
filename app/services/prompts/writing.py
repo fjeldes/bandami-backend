@@ -156,8 +156,8 @@ HOW TO UPGRADE:
 - For Task 1 letters: maintain the original tone and format
 
 Return ONLY valid JSON:
-{
+{{
   "upgraded_text": "The fully rewritten essay at {target_cefr} level...",
   "changes_summary": "2-3 sentence explanation of the key improvements made",
   "key_vocabulary": ["sophisticated word 1", "sophisticated word 2", "sophisticated word 3"]
-}"""
+}}"""

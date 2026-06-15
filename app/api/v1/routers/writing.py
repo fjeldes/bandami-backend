@@ -268,12 +268,11 @@ async def upgrade_writing(
     current_cefr = _band_to_cefr(current_band)
 
     from app.services.prompts.writing import WRITING_UPGRADE
-    prompt = WRITING_UPGRADE.format(
-        current_cefr=current_cefr,
-        current_band=current_band,
-        target_cefr=target_cefr,
-        target_band=target_band,
-    )
+    prompt = (WRITING_UPGRADE
+              .replace("__CURRENT_CEFR__", current_cefr)
+              .replace("__CURRENT_BAND__", str(current_band))
+              .replace("__TARGET_CEFR__", target_cefr)
+              .replace("__TARGET_BAND__", str(target_band)))
 
     try:
         response = await provider._call_ai(prompt, ev.user_submission, max_tokens=4096, temperature=0.4)

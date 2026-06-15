@@ -46,7 +46,7 @@ class OpenAIProvider(BaseSpeakingEvaluator, WritingEvaluator, ReadingEvaluator, 
         is_premium = detailed
         task_label = "Task 1 (Report/Letter)" if task_type == "task1" else "Task 2 (Essay)"
         prompt = WRITING_PREMIUM if is_premium else WRITING_OPENAI
-        max_tokens = 4096 if is_premium else 2000
+        max_tokens = 8192 if is_premium else 4096
 
         response = await self._get_client().chat.completions.create(
             model="gpt-4o",

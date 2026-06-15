@@ -10,7 +10,7 @@ MANDATORY — You MUST evaluate ALL 4 criteria below. Your response WILL BE REJE
 1. Fluency and Coherence (FC)
 2. Lexical Resource (LR)
 3. Grammatical Range and Accuracy (GRA)
-4. Pronunciation (P) - evaluate clarity, word stress, intonation, and intelligibility
+4. Pronunciation (P) — Note: pronunciation must be estimated from fluency, vocabulary, and grammar patterns in the transcript. Score conservatively and note this limitation in your comment.
 
 CRITICAL — You are evaluating a SPOKEN audio response. Do NOT mention "transcription", "transcript", "text", or "without audio" anywhere. Evaluate as if you heard the actual audio.
 
@@ -24,15 +24,16 @@ Return ONLY valid JSON:
     "fluency_and_coherence": {"score": 6.0, "comment": "..."},
     "lexical_resource": {"score": 6.0, "comment": "..."},
     "grammatical_range_and_accuracy": {"score": 5.5, "comment": "..."},
-    "pronunciation": {"score": 6.0, "comment": "Analysis of clarity, stress, and intonation..."}
+    "pronunciation": {"score": 6.0, "comment": "..."}
   },
-  "general_feedback": "2-3 sentence high-level speaking assessment. Be general, no specific corrections.",
-  "detailed_feedback": "Comprehensive speaking assessment with specific improvement suggestions...",
+  "general_feedback": "...",
+  "detailed_feedback": "...",
   "grammar_corrections": [
     {"original": "...", "corrected": "...", "explanation": "..."}
   ]
 }
-general_feedback must be general and brief (max 3 sentences). detailed_feedback must be comprehensive.
+general_feedback: 2-3 sentence high-level overall assessment. Be general, no specific corrections or word suggestions.
+detailed_feedback: Comprehensive assessment with specific improvement suggestions.
 Be strict and objective.
 REMEMBER: ALL 4 criteria_scores keys are REQUIRED. Missing keys = rejected response."""
 
@@ -44,7 +45,7 @@ Your response WILL BE REJECTED if ANY criterion is missing.
 1. Fluency and Coherence (FC)
 2. Lexical Resource (LR)
 3. Grammatical Range and Accuracy (GRA)
-4. Pronunciation (P) - evaluate clarity, word stress, intonation, and intelligibility
+4. Pronunciation (P) — Note: pronunciation must be estimated from fluency, vocabulary, and grammar patterns in the transcript. Score conservatively.
 
 CRITICAL — You are evaluating a SPOKEN audio response. Do NOT mention "transcription", "transcript", "text", or "without audio" anywhere. Evaluate as if you heard the actual audio.
 
@@ -55,16 +56,17 @@ Return ONLY valid JSON with CONCISE comments (max 1 short sentence each):
 {
   "overall_band": 6.0,
   "criteria_scores": {
-    "fluency_and_coherence": {"score": 6.0, "comment": "Speech flows with some hesitation."},
-    "lexical_resource": {"score": 6.0, "comment": "Adequate vocabulary range."},
-    "grammatical_range_and_accuracy": {"score": 5.5, "comment": "Some grammar errors present."},
-    "pronunciation": {"score": 6.0, "comment": "Generally clear and intelligible."}
+    "fluency_and_coherence": {"score": 6.0, "comment": "..."},
+    "lexical_resource": {"score": 6.0, "comment": "..."},
+    "grammatical_range_and_accuracy": {"score": 5.5, "comment": "..."},
+    "pronunciation": {"score": 6.0, "comment": "..."}
   },
-  "general_feedback": "2-3 sentence high-level speaking assessment. Be extremely general — no specific corrections, no explicit error mentions.",
+  "general_feedback": "...",
   "grammar_corrections": [
-    {"original": "I goes", "corrected": "I go", "explanation": "Subject-verb agreement"}
+    {"original": "...", "corrected": "...", "explanation": "..."}
   ]
 }
+general_feedback: 2-3 sentence high-level overall assessment. Be extremely general — no specific corrections, no word alternatives, no explicit error mentions.
 Limit grammar_corrections to the 2 most important errors only. Be strict and objective.
 REMEMBER: ALL 4 criteria_scores keys are REQUIRED. Missing keys = rejected response."""
 
@@ -87,7 +89,7 @@ MAIN CRITERIA + SUB-CRITERIA:
    - grammar_range: Variety of structures (simple, compound, complex, conditionals, passives)
    - grammar_accuracy: Error frequency, tense control, article use, preposition accuracy
 4. pronunciation (P):
-   - pronunciation_clarity: Overall clarity, word stress, intonation, connected speech, and ease of understanding
+   - pronunciation_clarity: Estimate overall clarity, word stress, intonation, and connected speech from fluency/vocabulary/grammar patterns. Score conservatively — this is estimated from text, not actual audio analysis.
 
 CRITICAL: criteria_scores MUST contain ALL 12 keys listed below. Any missing key = rejected.
 Provide 3-5 sentence detailed analysis for EACH sub-criterion.
@@ -96,25 +98,27 @@ Return ONLY valid JSON:
 {
   "overall_band": 6.0,
   "criteria_scores": {
-    "fluency_and_coherence": {"score": 6.0, "comment": "2-3 sentence summary..."},
-    "fluency": {"score": 6.0, "comment": "Detailed analysis of speech rate, pauses..."},
-    "coherence": {"score": 6.5, "comment": "Detailed analysis of connectors, topic flow..."},
-    "lexical_resource": {"score": 6.0, "comment": "2-3 sentence summary..."},
-    "vocabulary_range": {"score": 6.5, "comment": "Detailed analysis of vocabulary variety..."},
-    "vocabulary_precision": {"score": 5.5, "comment": "Detailed analysis of word choice accuracy..."},
-    "paraphrasing": {"score": 6.0, "comment": "Detailed analysis of reformulation ability..."},
-    "grammatical_range_and_accuracy": {"score": 5.5, "comment": "2-3 sentence summary..."},
-    "grammar_range": {"score": 6.0, "comment": "Detailed analysis of sentence structure variety..."},
-    "grammar_accuracy": {"score": 5.0, "comment": "Detailed analysis of error frequency and types..."},
-    "pronunciation": {"score": 6.0, "comment": "2-3 sentence summary of pronunciation..."},
-    "pronunciation_clarity": {"score": 6.0, "comment": "Detailed analysis of clarity, stress, and intonation..."}
+    "fluency_and_coherence": {"score": 6.0, "comment": "..."},
+    "fluency": {"score": 6.0, "comment": "..."},
+    "coherence": {"score": 6.5, "comment": "..."},
+    "lexical_resource": {"score": 6.0, "comment": "..."},
+    "vocabulary_range": {"score": 6.5, "comment": "..."},
+    "vocabulary_precision": {"score": 5.5, "comment": "..."},
+    "paraphrasing": {"score": 6.0, "comment": "..."},
+    "grammatical_range_and_accuracy": {"score": 5.5, "comment": "..."},
+    "grammar_range": {"score": 6.0, "comment": "..."},
+    "grammar_accuracy": {"score": 5.0, "comment": "..."},
+    "pronunciation": {"score": 6.0, "comment": "..."},
+    "pronunciation_clarity": {"score": 6.0, "comment": "..."}
   },
-  "general_feedback": "2-3 sentence high-level speaking assessment.",
-  "detailed_feedback": "Comprehensive speaking assessment with improvement roadmap for each area...",
+  "general_feedback": "...",
+  "detailed_feedback": "...",
   "grammar_corrections": [
     {"original": "...", "corrected": "...", "explanation": "..."}
   ]
 }
-general_feedback must be general and brief (max 3 sentences). detailed_feedback must be comprehensive with specific improvement suggestions per sub-criterion.
+general_feedback: 2-3 sentence high-level overall assessment. Be general and brief (max 3 sentences).
+detailed_feedback: Comprehensive speaking assessment with specific improvement suggestions for each sub-criterion.
+Limit grammar_corrections to the 8 most important errors only. Focus on errors that clearly represent grammar mistakes, not normal speech disfluencies.
 Be strict and objective.
 REMEMBER: ALL 12 criteria_scores keys are REQUIRED. Missing keys = rejected response."""

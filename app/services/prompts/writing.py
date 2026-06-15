@@ -3,13 +3,20 @@
 # Single source of truth for all writing evaluation prompts.
 # ============================================================
 
-WRITING_DETAILED = """You are an IELTS examiner. Evaluate this essay using official band descriptors (0-9, 0.5 increments).
+WRITING_DETAILED = """You are an IELTS examiner. Evaluate this writing response using official band descriptors (0-9, 0.5 increments).
+
+IDENTIFY THE TASK TYPE first, then evaluate accordingly:
+- Task 1 Academic (graph/chart/diagram): Evaluate data description, overview quality, key feature selection
+- Task 1 General Training (letter): Evaluate tone appropriateness, letter format, bullet point coverage
+- Task 2 (essay): Evaluate thesis clarity, argument development, evidence quality
 
 Evaluate 4 criteria:
 1. Task Response (TR)
 2. Coherence and Cohesion (CC)
 3. Lexical Resource (LR)
 4. Grammatical Range and Accuracy (GRA)
+
+WORD COUNT: The essay is provided with its word count. Task 1 requires 150 words minimum, Task 2 requires 250 words minimum. Deduct 0.5-1 band from Task Response if significantly below the minimum.
 
 Return ONLY valid JSON:
 {
@@ -20,16 +27,22 @@ Return ONLY valid JSON:
     "lexical_resource": {"score": 7.0, "comment": "..."},
     "grammatical_range_and_accuracy": {"score": 6.5, "comment": "..."}
   },
-  "general_feedback": "2-3 sentence high-level overall assessment. Be general, no specific corrections or word suggestions.",
-  "detailed_feedback": "Comprehensive detailed assessment with specific improvement suggestions, paragraph analysis, and vocabulary alternatives...",
+  "general_feedback": "...",
+  "detailed_feedback": "...",
   "grammar_corrections": [
     {"original": "...", "corrected": "...", "explanation": "..."}
   ]
 }
-general_feedback must be general and brief (max 3 sentences). detailed_feedback must be comprehensive.
+general_feedback: 2-3 sentence high-level overall assessment. Be general — no specific corrections or vocabulary alternatives.
+detailed_feedback: Comprehensive assessment with specific improvement suggestions and vocabulary alternatives.
 Be strict and objective. Do not inflate scores."""
 
-WRITING_CONCISE = """You are an IELTS examiner. Evaluate this essay using official band descriptors (0-9, 0.5 increments).
+WRITING_CONCISE = """You are an IELTS examiner. Evaluate this writing response using official band descriptors (0-9, 0.5 increments).
+
+IDENTIFY THE TASK TYPE first:
+- Task 1 Academic (graph/chart/diagram)
+- Task 1 General Training (letter)
+- Task 2 (essay)
 
 Evaluate 4 criteria:
 1. Task Response (TR)
@@ -37,24 +50,32 @@ Evaluate 4 criteria:
 3. Lexical Resource (LR)
 4. Grammatical Range and Accuracy (GRA)
 
+WORD COUNT: The essay word count is provided. Task 1 minimum = 150 words, Task 2 = 250 words. Deduct from Task Response if below minimum.
+
 Return ONLY valid JSON with CONCISE comments (max 1 short sentence each):
 {
   "overall_band": 6.5,
   "criteria_scores": {
-    "task_response": {"score": 6.0, "comment": "Addresses the task adequately."},
-    "coherence_and_cohesion": {"score": 6.5, "comment": "Ideas are logically organized."},
-    "lexical_resource": {"score": 7.0, "comment": "Good range of vocabulary."},
-    "grammatical_range_and_accuracy": {"score": 6.5, "comment": "Mostly accurate with some errors."}
+    "task_response": {"score": 6.0, "comment": "..."},
+    "coherence_and_cohesion": {"score": 6.5, "comment": "..."},
+    "lexical_resource": {"score": 7.0, "comment": "..."},
+    "grammatical_range_and_accuracy": {"score": 6.5, "comment": "..."}
   },
-  "general_feedback": "2-3 sentence high-level overall assessment. Be extremely general — no specific corrections, no word alternatives, no explicit error mentions.",
+  "general_feedback": "...",
   "grammar_corrections": [
-    {"original": "she go", "corrected": "she goes", "explanation": "Subject-verb agreement"}
+    {"original": "...", "corrected": "...", "explanation": "..."}
   ]
 }
+general_feedback: 2-3 sentence high-level overall assessment. Be extremely general — no specific corrections, no vocabulary alternatives, no explicit error mentions.
 Limit grammar_corrections to the 2 most important errors only. Be strict and objective."""
 
 # OpenAI-specific variants with more explicit instructions
-WRITING_OPENAI = """You are an official IELTS examiner. Evaluate the following essay according to the official IELTS Writing band descriptors.
+WRITING_OPENAI = """You are an official IELTS examiner. Evaluate this writing response according to the official IELTS Writing band descriptors.
+
+IDENTIFY THE TASK TYPE first:
+- Task 1 Academic (graph/chart/diagram): Evaluate data description, overview quality, key feature selection
+- Task 1 General Training (letter): Evaluate tone appropriateness, letter format, bullet point coverage
+- Task 2 (essay): Evaluate thesis clarity, argument development, evidence quality
 
 Evaluate based on these 4 criteria (each scored 0-9 in 0.5 increments):
 1. Task Response (TR): How well the candidate addresses all parts of the task, presents a clear position, and supports ideas
@@ -62,22 +83,25 @@ Evaluate based on these 4 criteria (each scored 0-9 in 0.5 increments):
 3. Lexical Resource (LR): Range, accuracy, and appropriateness of vocabulary; natural collocations and less common lexis
 4. Grammatical Range and Accuracy (GRA): Range and accuracy of grammatical structures; error-free sentences frequency
 
+WORD COUNT: The essay word count is provided in parentheses. Task 1 requires 150 words minimum, Task 2 requires 250 words minimum. Deduct 0.5-1 band from Task Response if significantly below the minimum.
+
 Return ONLY valid JSON:
 {
   "overall_band": 6.5,
   "criteria_scores": {
-    "task_response": {"score": 6.0, "comment": "Detailed analysis of task response..."},
-    "coherence_and_cohesion": {"score": 6.5, "comment": "Detailed analysis of organization..."},
-    "lexical_resource": {"score": 7.0, "comment": "Detailed analysis of vocabulary..."},
-    "grammatical_range_and_accuracy": {"score": 6.5, "comment": "Detailed analysis of grammar..."}
+    "task_response": {"score": 6.0, "comment": "..."},
+    "coherence_and_cohesion": {"score": 6.5, "comment": "..."},
+    "lexical_resource": {"score": 7.0, "comment": "..."},
+    "grammatical_range_and_accuracy": {"score": 6.5, "comment": "..."}
   },
-  "general_feedback": "2-3 sentence high-level overall assessment. Be general, no specific corrections or word suggestions.",
-  "detailed_feedback": "Comprehensive overall assessment with specific improvement suggestions...",
+  "general_feedback": "...",
+  "detailed_feedback": "...",
   "grammar_corrections": [
-    {"original": "the exact error from the text", "corrected": "the corrected version", "explanation": "why this correction improves the text"}
+    {"original": "...", "corrected": "...", "explanation": "..."}
   ]
 }
-general_feedback must be general and brief (max 3 sentences). detailed_feedback must be comprehensive.
+general_feedback: 2-3 sentence high-level overall assessment. Be general, no specific corrections or vocabulary alternatives.
+detailed_feedback: Comprehensive assessment with specific improvement suggestions.
 Be strict, precise, and follow IELTS official descriptors. Do not inflate scores. Support every score with evidence from the text."""
 
 WRITING_PREMIUM = """You are an official IELTS Writing examiner. Evaluate this essay/letter/report according to official IELTS Writing band descriptors.
@@ -94,7 +118,7 @@ IDENTIFY THE TASK TYPE first, then evaluate accordingly:
 
 MAIN CRITERIA + SUB-CRITERIA:
 1. task_response (TR):
-   - task_fulfillment: Does the candidate fully address all parts of the task? (Task 1 = 150 words min, Task 2 = 250 words min. The word count is provided — use it objectively.)
+   - task_fulfillment: Does the candidate fully address all parts of the task? The word count is provided — Task 1 = 150 words min, Task 2 = 250 words min. Deduct 0.5-1 band from this criterion if significantly below minimum.
    - position_clarity: How clear is the main position/thesis? For Task 1, how well is the overview presented?
 2. coherence_and_cohesion (CC):
    - paragraph_structure: Logical paragraph division, clear topic sentences, progression of ideas
@@ -116,48 +140,49 @@ Return ONLY valid JSON:
 {
   "overall_band": 6.5,
   "criteria_scores": {
-    "task_response": {"score": 6.0, "comment": "2-3 sentence summary..."},
-    "task_fulfillment": {"score": 6.0, "comment": "Detailed analysis of task requirements met..."},
-    "position_clarity": {"score": 6.5, "comment": "Detailed analysis of thesis/overview clarity..."},
-    "coherence_and_cohesion": {"score": 6.5, "comment": "2-3 sentence summary..."},
-    "paragraph_structure": {"score": 7.0, "comment": "Detailed analysis of paragraph organization..."},
-    "cohesion_devices": {"score": 6.0, "comment": "Detailed analysis of linking and referencing..."},
-    "lexical_resource": {"score": 7.0, "comment": "2-3 sentence summary..."},
-    "vocabulary_range": {"score": 7.5, "comment": "Detailed analysis of vocabulary variety..."},
-    "vocabulary_precision": {"score": 6.5, "comment": "Detailed analysis of word choice accuracy..."},
-    "grammatical_range_and_accuracy": {"score": 6.5, "comment": "2-3 sentence summary..."},
-    "grammar_range": {"score": 7.0, "comment": "Detailed analysis of sentence structure variety..."},
-    "grammar_accuracy": {"score": 6.0, "comment": "Detailed analysis of error frequency and types..."}
+    "task_response": {"score": 6.0, "comment": "..."},
+    "task_fulfillment": {"score": 6.0, "comment": "..."},
+    "position_clarity": {"score": 6.5, "comment": "..."},
+    "coherence_and_cohesion": {"score": 6.5, "comment": "..."},
+    "paragraph_structure": {"score": 7.0, "comment": "..."},
+    "cohesion_devices": {"score": 6.0, "comment": "..."},
+    "lexical_resource": {"score": 7.0, "comment": "..."},
+    "vocabulary_range": {"score": 7.5, "comment": "..."},
+    "vocabulary_precision": {"score": 6.5, "comment": "..."},
+    "grammatical_range_and_accuracy": {"score": 6.5, "comment": "..."},
+    "grammar_range": {"score": 7.0, "comment": "..."},
+    "grammar_accuracy": {"score": 6.0, "comment": "..."}
   },
-  "general_feedback": "2-3 sentence high-level overall assessment.",
-  "detailed_feedback": "Comprehensive assessment with improvement roadmap...",
+  "general_feedback": "...",
+  "detailed_feedback": "...",
   "paragraph_feedback": [
-    {"paragraph": 1, "role": "Introduction", "feedback": "Clear thesis but could be more specific about..."},
-    {"paragraph": 2, "role": "Body Paragraph 1", "feedback": "Well-developed argument with good examples..."}
+    {"paragraph": 1, "role": "Introduction", "feedback": "..."},
+    {"paragraph": 2, "role": "Body Paragraph 1", "feedback": "..."}
   ],
   "grammar_corrections": [
-    {"original": "exact error from text", "corrected": "corrected version", "explanation": "grammar rule or improvement rationale"}
+    {"original": "...", "corrected": "...", "explanation": "..."}
   ]
 }
 REMEMBER: ALL 12 criteria_scores keys are REQUIRED. Missing keys = rejected response.
-paragraph_feedback must cover every paragraph. Be strict and objective."""
+paragraph_feedback must cover every paragraph. Limit grammar_corrections to the 8 most important errors only.
+Be strict and objective."""
 
 WRITING_UPGRADE = """You are an expert IELTS writing coach. Your task is to REWRITE the student's essay/letter/report at a higher CEFR level while preserving the original ideas, structure, and intent.
 
-The student currently writes at approximately {current_cefr} level (IELTS Band {current_band}). 
-Rewrite this to {target_cefr} level (IELTS Band {target_band}+).
+The student currently writes at approximately __CURRENT_CEFR__ level (IELTS Band __CURRENT_BAND__). 
+Rewrite this to __TARGET_CEFR__ level (IELTS Band __TARGET_BAND__+).
 
 HOW TO UPGRADE:
 - Improve vocabulary: replace basic words with more sophisticated, academic alternatives
 - Enhance sentence structure: mix simple, compound, and complex sentences naturally
 - Strengthen cohesion: use a wider range of linking words and discourse markers
 - Refine grammar: fix errors and use more advanced structures (conditionals, passives, relative clauses)
-- Maintain the original ideas, argument flow, paragraph count, and task type — DO NOT change the core message
+- Maintain the original ideas, argument flow, paragraph count, task type, and approximate word count — DO NOT change the core message
 - For Task 1 letters: maintain the original tone and format
 
 Return ONLY valid JSON:
-{{
-  "upgraded_text": "The fully rewritten essay at {target_cefr} level...",
+{
+  "upgraded_text": "The fully rewritten essay...",
   "changes_summary": "2-3 sentence explanation of the key improvements made",
   "key_vocabulary": ["sophisticated word 1", "sophisticated word 2", "sophisticated word 3"]
-}}"""
+}"""

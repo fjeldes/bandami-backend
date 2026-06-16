@@ -41,8 +41,8 @@ class Settings(BaseSettings):
     lemonsqueezy_api_key: str = ""
     lemonsqueezy_webhook_secret: str = ""
     lemonsqueezy_store_id: str = ""
-    lemonsqueezy_variant_premium: str = ""
-    lemonsqueezy_variant_exam_week: str = ""
+    lemonsqueezy_product_premium: str = ""
+    lemonsqueezy_product_exam_week: str = ""
 
     flow_api_key: str = ""
     flow_secret_key: str = ""

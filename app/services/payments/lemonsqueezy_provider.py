@@ -39,15 +39,35 @@ class LemonSqueezyProvider(PaymentProvider):
             "Content-Type": "application/vnd.api+json",
         }
 
-    def _variant_id(self, plan_slug: str) -> str:
+    def _product_id(self, plan_slug: str) -> str:
         s = get_settings()
         mapping = {
-            "premium": s.lemonsqueezy_variant_premium,
-            "exam_week_pass": s.lemonsqueezy_variant_exam_week,
+            "premium": s.lemonsqueezy_product_premium,
+            "exam_week_pass": s.lemonsqueezy_product_exam_week,
         }
-        vid = mapping.get(plan_slug)
-        if not vid:
-            raise ValueError(f"No LemonSqueezy variant configured for: {plan_slug}")
+        pid = mapping.get(plan_slug)
+        if not pid:
+            raise ValueError(f"No LemonSqueezy product configured for: {plan_slug}")
+        return pid
+
+    async def _fetch_first_variant(self, product_id: str) -> str:
+        """Fetch the first variant ID for a given product."""
+        cached = getattr(self, "_variant_cache", None)
+        if cached and cached.get(product_id):
+            return cached[product_id]
+
+        data = await self._get(
+            "/variants",
+            params={"filter[product_id]": product_id, "page[size]": "1"},
+        )
+        variants = data.get("data", [])
+        if not variants:
+            raise ValueError(f"No variants found for product {product_id}")
+
+        vid = self._id(variants[0])
+        if not cached:
+            self._variant_cache = {}
+        self._variant_cache[product_id] = vid
         return vid
 
     async def _post(self, path: str, body: dict, headers: dict | None = None) -> dict:
@@ -102,7 +122,11 @@ class LemonSqueezyProvider(PaymentProvider):
         success_url: str, cancel_url: str, discount_percent: int = 0,
     ) -> dict:
         s = get_settings()
-        variant_id = self._variant_id(plan_slug)
+        product_id = self._product_id(plan_slug)
+        variant_id = await self._fetch_first_variant(product_id)
+
+        logger.info("Creating LS checkout product=%s variant=%s store=%s plan=%s user=%s",
+                    product_id, variant_id, s.lemonsqueezy_store_id, plan_slug, user_id)
 
         body = {
             "data": {
@@ -522,7 +546,8 @@ class LemonSqueezyProvider(PaymentProvider):
 
         if sub.stripe_subscription_id:
             try:
-                new_variant_id = self._variant_id(new_plan_slug)
+                new_product_id = self._product_id(new_plan_slug)
+                new_variant_id = await self._fetch_first_variant(new_product_id)
                 await self._patch(f"/subscriptions/{sub.stripe_subscription_id}", {
                     "data": {
                         "type": "subscriptions",

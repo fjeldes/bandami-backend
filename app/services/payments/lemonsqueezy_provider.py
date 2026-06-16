@@ -391,6 +391,7 @@ class LemonSqueezyProvider(PaymentProvider):
         attrs = self._attr(checkout)
 
         status = attrs.get("status", "")
+        logger.info("LS verify checkout_id=%s status=%s", checkout_id, status)
         if status not in ("paid", "complete", "completed"):
             return {"status": "pending", "message": f"Payment status: {status}"}
 
@@ -406,24 +407,19 @@ class LemonSqueezyProvider(PaymentProvider):
         if not checkout_plan_slug:
             return {"status": "error", "message": "Missing plan in checkout"}
 
-        # Check idempotency by order_id in the checkout response
-        order_id = str(attrs.get("order_id", checkout_id))
-        if db.query(UserSubscription).filter(UserSubscription.stripe_session_id == order_id).first():
-            return {"status": "already_processed"}
-
-        # Subscription might already be provisioned by webhook — check by email
-        user = db.query(UserProfile).filter(UserProfile.id == user_id).first()
-        if not user or not user.email:
-            return {"status": "error", "message": "User not found"}
-
+        # Check if webhook already provisioned
         existing = db.query(UserSubscription).filter(
             UserSubscription.user_id == user_id,
-            UserSubscription.status.in_(["active", "on_trial", "trialing"]),
+            UserSubscription.status.in_(["active", "trialing"]),
             UserSubscription.current_period_end > datetime.now(timezone.utc),
         ).first()
         if existing:
             logger.info("Subscription already active user=%s — webhook beat us", user_id)
             return {"status": "already_processed"}
+
+        user = db.query(UserProfile).filter(UserProfile.id == user_id).first()
+        if not user:
+            return {"status": "error", "message": "User not found"}
 
         # Provision subscription from checkout data
         plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.slug == checkout_plan_slug).first()
@@ -431,6 +427,7 @@ class LemonSqueezyProvider(PaymentProvider):
             return {"status": "skipped", "reason": "plan_not_found"}
 
         now = datetime.now(timezone.utc)
+        order_id = str(attrs.get("order_id", checkout_id))
         sub_id = str(attrs.get("subscription_id", ""))
         if not sub_id:
             first_item = attrs.get("first_order_item", {}) or {}

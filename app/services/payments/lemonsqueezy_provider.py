@@ -34,7 +34,7 @@ class LemonSqueezyProvider(PaymentProvider):
     def _headers(self) -> dict:
         s = get_settings()
         return {
-            "Authorization": f"Bearer {s.lemonsqueezy_api_key}",
+            "Authorization": f"Bearer {s.lemonsqueezy_api_key.strip()}",
             "Accept": "application/vnd.api+json",
             "Content-Type": "application/vnd.api+json",
         }

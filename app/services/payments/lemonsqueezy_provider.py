@@ -141,6 +141,9 @@ class LemonSqueezyProvider(PaymentProvider):
                             "plan_slug": plan_slug,
                         }
                     },
+                    "checkout_options": {
+                        "redirect_url": success_url,
+                    },
                 },
                 "relationships": {
                     "store": {"data": {"type": "stores", "id": s.lemonsqueezy_store_id}},

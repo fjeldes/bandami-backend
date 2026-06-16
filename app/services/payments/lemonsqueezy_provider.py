@@ -135,22 +135,26 @@ class LemonSqueezyProvider(PaymentProvider):
             "data": {
                 "type": "checkouts",
                 "attributes": {
+                    "product_options": {
+                        "redirect_url": success_url,
+                    },
                     "checkout_data": {
+                        "email": user_email,
                         "custom": {
                             "user_id": user_id,
                             "plan_slug": plan_slug,
                         }
                     },
-                    "checkout_options": {
-                        "redirect_url": success_url,
-                    },
                 },
                 "relationships": {
-                    "store": {"data": {"type": "stores", "id": s.lemonsqueezy_store_id}},
-                    "variant": {"data": {"type": "variants", "id": variant_id}},
+                    "store": {"data": {"type": "stores", "id": str(s.lemonsqueezy_store_id)}},
+                    "variant": {"data": {"type": "variants", "id": str(variant_id)}},
                 },
             }
         }
+
+        import json as _json
+        logger.info("LS checkout body: %s", _json.dumps(body))
 
         data = await self._post("/checkouts", body)
         checkout_attrs = self._attr(data.get("data", {}))

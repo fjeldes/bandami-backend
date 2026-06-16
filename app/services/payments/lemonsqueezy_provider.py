@@ -104,10 +104,13 @@ class LemonSqueezyProvider(PaymentProvider):
             return r.json()
 
     @staticmethod
-    def _attr(data: dict, key: str, default=None):
-        if isinstance(data, dict):
-            return data.get("attributes", {}).get(key, default)
-        return default
+    def _attr(data: dict, key: str | None = None, default=None):
+        if not isinstance(data, dict):
+            return default
+        attrs = data.get("attributes") or {}
+        if key is None:
+            return attrs
+        return attrs.get(key, default)
 
     @staticmethod
     def _id(data: dict) -> str | None:

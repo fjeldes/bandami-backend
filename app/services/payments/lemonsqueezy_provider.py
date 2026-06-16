@@ -275,7 +275,8 @@ class LemonSqueezyProvider(PaymentProvider):
             datetime.fromisoformat(renews_at.replace("Z", "+00:00"))
             if renews_at else now + timedelta(days=30)
         )
-        status = attrs.get("status", "active")
+        raw_status = attrs.get("status", "active")
+        status = "trialing" if raw_status == "on_trial" else raw_status
 
         new_sub = UserSubscription(
             id=str(uuid4()), user_id=str(user.id), plan_id=str(plan.id),

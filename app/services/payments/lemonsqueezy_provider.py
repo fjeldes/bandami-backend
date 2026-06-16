@@ -188,22 +188,11 @@ class LemonSqueezyProvider(PaymentProvider):
         logger.info("Webhook received event_type=%s entity_id=%s", event_name, sub_id)
 
         if event_name == "order_created":
-            return self._handle_order_created(attrs, data, db, UserProfile, UserSubscription, SubscriptionPlan)
+            logger.info("Order created order=%s — provisioning handled by subscription_created", sub_id)
+            return {"status": "ok"}
 
         if event_name == "subscription_created":
-            sub_id = self._id(data)
-            if sub_id:
-                sub = db.query(UserSubscription).filter(
-                    UserSubscription.stripe_subscription_id == sub_id,
-                ).first()
-                if sub:
-                    sub.status = attrs.get("status", sub.status)
-                    renews = attrs.get("renews_at")
-                    if renews:
-                        sub.current_period_end = datetime.fromisoformat(renews.replace("Z", "+00:00"))
-                    db.commit()
-                    logger.info("Subscription created sub=%s user=%s", sub_id, sub.user_id)
-            return {"status": "ok"}
+            return self._handle_subscription_created(attrs, data, db, UserProfile, UserSubscription, SubscriptionPlan)
 
         if event_name == "subscription_payment_success":
             return self._handle_subscription_payment_success(attrs, data, db, UserProfile, UserSubscription)
@@ -250,75 +239,76 @@ class LemonSqueezyProvider(PaymentProvider):
 
         return {"status": "unhandled_event", "type": event_name}
 
-    # -- order_created handler ------------------------------------------------
+    # -- subscription_created handler -----------------------------------------
 
-    def _handle_order_created(
+    def _handle_subscription_created(
         self, attrs: dict, data: dict, db: DbSession,
         UserProfile, UserSubscription, SubscriptionPlan,
     ) -> dict:
-        order_id = self._id(data)
+        """LS webhook payload has user_email, status, renews_at — find user by email."""
+        sub_id = self._id(data)
+        user_email = attrs.get("user_email", "")
+        order_id = str(attrs.get("order_id", ""))
 
-        custom = attrs.get("custom", {}) or {}
-        user_id = custom.get("user_id")
-        plan_slug = custom.get("plan_slug")
-
-        if not user_id or not plan_slug:
-            return {"status": "skipped", "reason": "missing_custom_data"}
+        if not sub_id or not user_email:
+            return {"status": "skipped", "reason": "missing_subscription_id_or_email"}
 
         # Idempotency
-        if db.query(UserSubscription).filter(UserSubscription.stripe_session_id == order_id).first():
-            logger.info("Duplicate order skipped order=%s", order_id)
+        if db.query(UserSubscription).filter(
+            UserSubscription.stripe_subscription_id == sub_id,
+        ).first():
+            logger.info("Subscription already exists sub=%s", sub_id)
             return {"status": "already_processed"}
 
-        first_order_item = attrs.get("first_order_item", {}) or {}
-        subscription_id = str(first_order_item.get("subscription_id", ""))
-        variant_name = first_order_item.get("variant_name", "")
+        user = db.query(UserProfile).filter(UserProfile.email == user_email).first()
+        if not user:
+            logger.warning("User not found for email=%s", user_email)
+            return {"status": "skipped", "reason": "user_not_found"}
 
-        plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.slug == plan_slug).first()
-        if not plan or plan_slug not in ("premium", "exam_week_pass"):
-            return {"status": "skipped"}
+        plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.slug == "premium").first()
+        if not plan:
+            return {"status": "skipped", "reason": "premium_plan_not_found"}
 
         now = datetime.now(timezone.utc)
-        renews_at = first_order_item.get("renews_at")
+        renews_at = attrs.get("renews_at")
         current_period_end = (
             datetime.fromisoformat(renews_at.replace("Z", "+00:00"))
             if renews_at else now + timedelta(days=30)
         )
+        status = attrs.get("status", "active")
 
         new_sub = UserSubscription(
-            id=str(uuid4()), user_id=user_id, plan_id=str(plan.id),
-            status="active", current_period_start=now, current_period_end=current_period_end,
-            stripe_subscription_id=subscription_id, stripe_session_id=order_id,
+            id=str(uuid4()), user_id=str(user.id), plan_id=str(plan.id),
+            status=status, current_period_start=now, current_period_end=current_period_end,
+            stripe_subscription_id=sub_id, stripe_session_id=order_id,
         )
         db.add(new_sub)
 
-        user = db.query(UserProfile).filter(UserProfile.id == user_id).first()
         update = {"subscription_tier": "premium"}
-        if user and not user.upgraded_at:
+        if not user.upgraded_at:
             update["upgraded_at"] = now
-        db.query(UserProfile).filter(UserProfile.id == user_id).update(update)
+        db.query(UserProfile).filter(UserProfile.id == str(user.id)).update(update)
         db.flush()
 
         total_cents = int(attrs.get("total", 0))
         if total_cents > 0:
             from app.models.subscription import UserPayment
             db.add(UserPayment(
-                user_id=user_id, subscription_id=new_sub.id,
+                user_id=str(user.id), subscription_id=new_sub.id,
                 amount_clp=total_cents, currency=attrs.get("currency", "USD"),
                 flow_order=order_id, flow_invoice_id=f"ls_inv_{order_id}",
                 period_start=now, period_end=current_period_end,
                 payment_type="first_charge",
             ))
 
-        if total_cents == 0:
-            if user and user.email:
-                send_trial_welcome_email(
-                    to_email=user.email,
-                    name=user.full_name or "there",
-                )
+        if total_cents == 0 or status == "on_trial":
+            send_trial_welcome_email(
+                to_email=user.email,
+                name=user.full_name or "there",
+            )
 
-        logger.info("Subscription created user=%s sub=%s plan=%s order=%s amount=%s",
-                    user_id, subscription_id, plan_slug, order_id, total_cents)
+        logger.info("Subscription created via webhook user=%s sub=%s order=%s amount=%s",
+                    user.id, sub_id, order_id, total_cents)
         db.commit()
         return {"status": "ok"}
 
@@ -398,15 +388,14 @@ class LemonSqueezyProvider(PaymentProvider):
 
         checkout = data.get("data", {})
         attrs = self._attr(checkout)
-        custom = attrs.get("custom", {}) or {}
 
-        if attrs.get("status") != "paid":
-            return {"status": "pending", "message": "Payment not completed"}
+        status = attrs.get("status", "")
+        if status not in ("paid", "complete", "completed"):
+            return {"status": "pending", "message": f"Payment status: {status}"}
 
-        order_id = self._id(checkout)
-        if db.query(UserSubscription).filter(UserSubscription.stripe_session_id == order_id).first():
-            return {"status": "already_processed"}
-
+        # Custom data is nested under checkout_data in GET /checkouts response
+        checkout_data = attrs.get("checkout_data", {}) or {}
+        custom = checkout_data.get("custom", {}) or {}
         checkout_user_id = custom.get("user_id")
         checkout_plan_slug = custom.get("plan_slug")
 
@@ -416,24 +405,63 @@ class LemonSqueezyProvider(PaymentProvider):
         if not checkout_plan_slug:
             return {"status": "error", "message": "Missing plan in checkout"}
 
-        # Simulate order_created with checkout data
-        fake_event_data = {
-            "id": order_id,
-            "attributes": {
-                "custom": custom,
-                "first_order_item": {
-                    "subscription_id": attrs.get("subscription_id", ""),
-                    "variant_name": attrs.get("variant_name", ""),
-                },
-                "total": attrs.get("total", 0),
-                "currency": attrs.get("currency", "USD"),
-            },
-        }
-        self._handle_order_created(
-            {"custom": custom, "first_order_item": attrs.get("first_order_item", {}),
-             "total": attrs.get("total", 0), "currency": attrs.get("currency", "USD")},
-            fake_event_data, db, UserProfile, UserSubscription, SubscriptionPlan,
+        # Check idempotency by order_id in the checkout response
+        order_id = str(attrs.get("order_id", checkout_id))
+        if db.query(UserSubscription).filter(UserSubscription.stripe_session_id == order_id).first():
+            return {"status": "already_processed"}
+
+        # Subscription might already be provisioned by webhook — check by email
+        user = db.query(UserProfile).filter(UserProfile.id == user_id).first()
+        if not user or not user.email:
+            return {"status": "error", "message": "User not found"}
+
+        existing = db.query(UserSubscription).filter(
+            UserSubscription.user_id == user_id,
+            UserSubscription.status.in_(["active", "on_trial", "trialing"]),
+            UserSubscription.current_period_end > datetime.now(timezone.utc),
+        ).first()
+        if existing:
+            logger.info("Subscription already active user=%s — webhook beat us", user_id)
+            return {"status": "already_processed"}
+
+        # Provision subscription from checkout data
+        plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.slug == checkout_plan_slug).first()
+        if not plan:
+            return {"status": "skipped", "reason": "plan_not_found"}
+
+        now = datetime.now(timezone.utc)
+        sub_id = str(attrs.get("subscription_id", ""))
+        if not sub_id:
+            first_item = attrs.get("first_order_item", {}) or {}
+            sub_id = str(first_item.get("subscription_id", ""))
+
+        new_sub = UserSubscription(
+            id=str(uuid4()), user_id=user_id, plan_id=str(plan.id),
+            status="active", current_period_start=now,
+            current_period_end=now + timedelta(days=30),
+            stripe_subscription_id=sub_id, stripe_session_id=order_id,
         )
+        db.add(new_sub)
+
+        update = {"subscription_tier": "premium"}
+        if not user.upgraded_at:
+            update["upgraded_at"] = now
+        db.query(UserProfile).filter(UserProfile.id == user_id).update(update)
+
+        total_cents = int(attrs.get("total", 0))
+        if total_cents > 0:
+            from app.models.subscription import UserPayment
+            db.add(UserPayment(
+                user_id=user_id, subscription_id=new_sub.id,
+                amount_clp=total_cents, currency=attrs.get("currency", "USD"),
+                flow_order=order_id, flow_invoice_id=f"ls_inv_{order_id}",
+                period_start=now, period_end=now + timedelta(days=30),
+                payment_type="first_charge",
+            ))
+
+        logger.info("Subscription provisioned via verify user=%s order=%s plan=%s amount=%s",
+                    user_id, order_id, checkout_plan_slug, total_cents)
+        db.commit()
         return {"status": "ok"}
 
     # -- get_subscription -----------------------------------------------------

@@ -29,7 +29,7 @@ EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 DO $$ BEGIN
-    CREATE TYPE subscription_status_enum AS ENUM ('active', 'canceled', 'past_due', 'expired', 'trialing');
+    CREATE TYPE subscription_status_enum AS ENUM ('active', 'canceled', 'past_due', 'expired', 'trialing', 'cancel_at_period_end');
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 

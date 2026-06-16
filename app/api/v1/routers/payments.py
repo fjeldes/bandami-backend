@@ -79,6 +79,8 @@ async def payment_webhook(
 
     if provider.provider_name == "flow":
         signature = ""
+    elif provider.provider_name == "lemonsqueezy":
+        signature = request.headers.get("x-signature", "")
     else:
         signature = request.headers.get(
             "stripe-signature" if provider.provider_name == "stripe" else "paddle-signature", ""
@@ -86,7 +88,8 @@ async def payment_webhook(
 
     try:
         event = await provider.handle_webhook(payload, signature)
-        logger.info("Webhook received provider=%s event_type=%s", provider.provider_name, event.get("event_type", "unknown"))
+        event_type = event.get("event_type") or event.get("meta", {}).get("event_name", "unknown")
+        logger.info("Webhook received provider=%s event_type=%s", provider.provider_name, event_type)
     except Exception:
         logger.warning("Webhook signature verification failed provider=%s", provider.provider_name)
         raise HTTPException(status_code=400, detail="Invalid webhook signature")
@@ -95,7 +98,7 @@ async def payment_webhook(
         event, db, UserProfile, UserSubscription, SubscriptionPlan,
     )
     logger.info("Webhook processed provider=%s event_type=%s result=%s",
-                provider.provider_name, event.get("event_type", "unknown"), result.get("status"))
+                provider.provider_name, event_type, result.get("status"))
     return result
 
 
@@ -180,8 +183,15 @@ async def verify_checkout_session(
 
     if provider.provider_name == "paddle":
         from app.services.payments.paddle_provider import PaddleProvider
-        paddle = provider  # type: PaddleProvider
+        paddle = provider
         return await paddle.verify_transaction(
+            session_id, user_id, db, UserProfile, UserSubscription, SubscriptionPlan,
+        )
+
+    if provider.provider_name == "lemonsqueezy":
+        from app.services.payments.lemonsqueezy_provider import LemonSqueezyProvider
+        ls = provider
+        return await ls.verify_transaction(
             session_id, user_id, db, UserProfile, UserSubscription, SubscriptionPlan,
         )
 

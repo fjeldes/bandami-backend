@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     paddle_price_exam_week: str = ""
     paddle_environment: str = "sandbox"
 
+    lemonsqueezy_api_key: str = ""
+    lemonsqueezy_webhook_secret: str = ""
+    lemonsqueezy_store_id: str = ""
+    lemonsqueezy_variant_premium: str = ""
+    lemonsqueezy_variant_exam_week: str = ""
+
     flow_api_key: str = ""
     flow_secret_key: str = ""
     flow_environment: str = "sandbox"

@@ -1,0 +1,588 @@
+"""
+LemonSqueezy Payment Provider — Merchant of Record for global tax compliance.
+Uses JSON:API format. Replaces Paddle.
+"""
+import hashlib
+import hmac
+import json
+import logging
+from datetime import datetime, timezone, timedelta
+from uuid import uuid4
+
+import httpx
+from sqlalchemy.orm import Session as DbSession
+
+from app.core.config import get_settings
+from app.services.payments.base import PaymentProvider, SubscriptionInfo
+from app.services.email_service import send_trial_welcome_email, send_purchase_confirmation
+
+logger = logging.getLogger(__name__)
+
+
+class LemonSqueezyProvider(PaymentProvider):
+
+    @property
+    def provider_name(self) -> str:
+        return "lemonsqueezy"
+
+    # -- helpers --------------------------------------------------------------
+
+    @staticmethod
+    def _base_url() -> str:
+        return "https://api.lemonsqueezy.com/v1"
+
+    def _headers(self) -> dict:
+        s = get_settings()
+        return {
+            "Authorization": f"Bearer {s.lemonsqueezy_api_key}",
+            "Accept": "application/vnd.api+json",
+            "Content-Type": "application/vnd.api+json",
+        }
+
+    def _variant_id(self, plan_slug: str) -> str:
+        s = get_settings()
+        mapping = {
+            "premium": s.lemonsqueezy_variant_premium,
+            "exam_week_pass": s.lemonsqueezy_variant_exam_week,
+        }
+        vid = mapping.get(plan_slug)
+        if not vid:
+            raise ValueError(f"No LemonSqueezy variant configured for: {plan_slug}")
+        return vid
+
+    async def _post(self, path: str, body: dict, headers: dict | None = None) -> dict:
+        h = headers or self._headers()
+        async with httpx.AsyncClient() as client:
+            r = await client.post(f"{self._base_url()}{path}", headers=h, json=body)
+            if r.status_code >= 400:
+                logger.error("LS POST %s failed: %s — %s", path, r.status_code, r.text)
+            r.raise_for_status()
+            return r.json()
+
+    async def _get(self, path: str, params: dict | None = None) -> dict:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(f"{self._base_url()}{path}", headers=self._headers(), params=params)
+            if r.status_code >= 400:
+                logger.error("LS GET %s failed: %s — %s", path, r.status_code, r.text)
+            r.raise_for_status()
+            return r.json()
+
+    async def _patch(self, path: str, body: dict) -> dict:
+        async with httpx.AsyncClient() as client:
+            r = await client.patch(f"{self._base_url()}{path}", headers=self._headers(), json=body)
+            if r.status_code >= 400:
+                logger.error("LS PATCH %s failed: %s — %s", path, r.status_code, r.text)
+            r.raise_for_status()
+            return r.json()
+
+    async def _delete(self, path: str) -> dict:
+        async with httpx.AsyncClient() as client:
+            r = await client.delete(f"{self._base_url()}{path}", headers=self._headers())
+            if r.status_code >= 400:
+                logger.error("LS DELETE %s failed: %s — %s", path, r.status_code, r.text)
+            r.raise_for_status()
+            return r.json()
+
+    @staticmethod
+    def _attr(data: dict, key: str, default=None):
+        if isinstance(data, dict):
+            return data.get("attributes", {}).get(key, default)
+        return default
+
+    @staticmethod
+    def _id(data: dict) -> str | None:
+        if isinstance(data, dict):
+            return str(data.get("id", ""))
+        return None
+
+    # -- create_checkout ------------------------------------------------------
+
+    async def create_checkout(
+        self, plan_slug: str, user_id: str, user_email: str,
+        success_url: str, cancel_url: str, discount_percent: int = 0,
+    ) -> dict:
+        s = get_settings()
+        variant_id = self._variant_id(plan_slug)
+
+        body = {
+            "data": {
+                "type": "checkouts",
+                "attributes": {
+                    "checkout_data": {
+                        "custom": {
+                            "user_id": user_id,
+                            "plan_slug": plan_slug,
+                        }
+                    },
+                },
+                "relationships": {
+                    "store": {"data": {"type": "stores", "id": s.lemonsqueezy_store_id}},
+                    "variant": {"data": {"type": "variants", "id": variant_id}},
+                },
+            }
+        }
+
+        data = await self._post("/checkouts", body)
+        checkout_attrs = self._attr(data.get("data", {}))
+        return {
+            "url": checkout_attrs.get("url", ""),
+            "checkout_id": self._id(data.get("data", {})),
+        }
+
+    # -- webhook --------------------------------------------------------------
+
+    async def handle_webhook(self, payload: bytes, signature: str) -> dict:
+        """LemonSqueezy webhooks use HMAC-SHA256 hex digest in X-Signature header."""
+        s = get_settings()
+        secret = getattr(s, "lemonsqueezy_webhook_secret", "") or ""
+        computed = hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
+
+        if not hmac.compare_digest(computed, signature):
+            raise ValueError("Invalid LemonSqueezy webhook signature")
+
+        return json.loads(payload)
+
+    async def process_webhook_event(
+        self, event: dict, db: DbSession,
+        UserProfile, UserSubscription, SubscriptionPlan,
+    ) -> dict:
+        event_name = event.get("meta", {}).get("event_name", "")
+        data = event.get("data", {})
+        attrs = self._attr(data)
+        sub_id = self._id(data)
+
+        logger.info("Webhook received event_type=%s entity_id=%s", event_name, sub_id)
+
+        if event_name == "order_created":
+            return self._handle_order_created(attrs, data, db, UserProfile, UserSubscription, SubscriptionPlan)
+
+        if event_name == "subscription_created":
+            sub_id = self._id(data)
+            if sub_id:
+                sub = db.query(UserSubscription).filter(
+                    UserSubscription.stripe_subscription_id == sub_id,
+                ).first()
+                if sub:
+                    sub.status = attrs.get("status", sub.status)
+                    renews = attrs.get("renews_at")
+                    if renews:
+                        sub.current_period_end = datetime.fromisoformat(renews.replace("Z", "+00:00"))
+                    db.commit()
+                    logger.info("Subscription created sub=%s user=%s", sub_id, sub.user_id)
+            return {"status": "ok"}
+
+        if event_name == "subscription_payment_success":
+            return self._handle_subscription_payment_success(attrs, data, db, UserProfile, UserSubscription)
+
+        if event_name in ("subscription_cancelled", "subscription_expired"):
+            if sub_id:
+                sub = db.query(UserSubscription).filter(
+                    UserSubscription.stripe_subscription_id == sub_id,
+                ).first()
+                if sub:
+                    sub.status = "canceled"
+                    sub.canceled_at = datetime.now(timezone.utc)
+                    sub.auto_renew = False
+                    db.query(UserProfile).filter(UserProfile.id == sub.user_id).update({"subscription_tier": "free"})
+                    db.commit()
+                    logger.info("Subscription canceled/expired sub=%s user=%s", sub_id, sub.user_id)
+                else:
+                    logger.warning("Subscription not found for cancel event sub=%s", sub_id)
+            return {"status": "ok"}
+
+        if event_name == "subscription_updated":
+            if sub_id:
+                sub = db.query(UserSubscription).filter(
+                    UserSubscription.stripe_subscription_id == sub_id,
+                ).first()
+                if sub:
+                    new_status = attrs.get("status")
+                    if sub.status == "canceled" and new_status == "active":
+                        logger.warning("Skipping canceled→active transition for sub=%s", sub_id)
+                        return {"status": "skipped", "reason": "canceled_to_active"}
+                    if new_status:
+                        sub.status = new_status
+                    renews = attrs.get("renews_at")
+                    if renews:
+                        sub.current_period_end = datetime.fromisoformat(renews.replace("Z", "+00:00"))
+                    ends = attrs.get("ends_at")
+                    if ends:
+                        sub.current_period_end = datetime.fromisoformat(ends.replace("Z", "+00:00"))
+                    db.commit()
+                    logger.info("Subscription updated sub=%s user=%s status=%s", sub_id, sub.user_id, sub.status)
+                else:
+                    logger.warning("Subscription not found for update event sub=%s", sub_id)
+            return {"status": "ok"}
+
+        return {"status": "unhandled_event", "type": event_name}
+
+    # -- order_created handler ------------------------------------------------
+
+    def _handle_order_created(
+        self, attrs: dict, data: dict, db: DbSession,
+        UserProfile, UserSubscription, SubscriptionPlan,
+    ) -> dict:
+        order_id = self._id(data)
+
+        custom = attrs.get("custom", {}) or {}
+        user_id = custom.get("user_id")
+        plan_slug = custom.get("plan_slug")
+
+        if not user_id or not plan_slug:
+            return {"status": "skipped", "reason": "missing_custom_data"}
+
+        # Idempotency
+        if db.query(UserSubscription).filter(UserSubscription.stripe_session_id == order_id).first():
+            logger.info("Duplicate order skipped order=%s", order_id)
+            return {"status": "already_processed"}
+
+        first_order_item = attrs.get("first_order_item", {}) or {}
+        subscription_id = str(first_order_item.get("subscription_id", ""))
+        variant_name = first_order_item.get("variant_name", "")
+
+        plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.slug == plan_slug).first()
+        if not plan or plan_slug not in ("premium", "exam_week_pass"):
+            return {"status": "skipped"}
+
+        now = datetime.now(timezone.utc)
+        renews_at = first_order_item.get("renews_at")
+        current_period_end = (
+            datetime.fromisoformat(renews_at.replace("Z", "+00:00"))
+            if renews_at else now + timedelta(days=30)
+        )
+
+        new_sub = UserSubscription(
+            id=str(uuid4()), user_id=user_id, plan_id=str(plan.id),
+            status="active", current_period_start=now, current_period_end=current_period_end,
+            stripe_subscription_id=subscription_id, stripe_session_id=order_id,
+        )
+        db.add(new_sub)
+
+        user = db.query(UserProfile).filter(UserProfile.id == user_id).first()
+        update = {"subscription_tier": "premium"}
+        if user and not user.upgraded_at:
+            update["upgraded_at"] = now
+        db.query(UserProfile).filter(UserProfile.id == user_id).update(update)
+        db.flush()
+
+        total_cents = int(attrs.get("total", 0))
+        if total_cents > 0:
+            from app.models.subscription import UserPayment
+            db.add(UserPayment(
+                user_id=user_id, subscription_id=new_sub.id,
+                amount_clp=total_cents, currency=attrs.get("currency", "USD"),
+                flow_order=order_id, flow_invoice_id=f"ls_inv_{order_id}",
+                period_start=now, period_end=current_period_end,
+                payment_type="first_charge",
+            ))
+
+        if total_cents == 0:
+            if user and user.email:
+                send_trial_welcome_email(
+                    to_email=user.email,
+                    name=user.full_name or "there",
+                )
+
+        logger.info("Subscription created user=%s sub=%s plan=%s order=%s amount=%s",
+                    user_id, subscription_id, plan_slug, order_id, total_cents)
+        db.commit()
+        return {"status": "ok"}
+
+    # -- subscription_payment_success handler ---------------------------------
+
+    def _handle_subscription_payment_success(
+        self, attrs: dict, data: dict, db: DbSession,
+        UserProfile, UserSubscription,
+    ) -> dict:
+        sub_id = str(attrs.get("subscription_id", ""))
+        order_id = self._id(data)
+
+        existing_sub = db.query(UserSubscription).filter(
+            UserSubscription.stripe_subscription_id == sub_id,
+        ).first()
+
+        if not existing_sub:
+            logger.warning("Subscription not found for payment success sub=%s", sub_id)
+            return {"status": "skipped", "reason": "no_subscription"}
+
+        # Idempotency
+        from app.models.subscription import UserPayment
+        if db.query(UserPayment).filter(UserPayment.flow_order == order_id).first():
+            logger.info("Duplicate payment skipped order=%s", order_id)
+            return {"status": "already_processed"}
+
+        now = datetime.now(timezone.utc)
+        renews_at = attrs.get("renews_at")
+        existing_sub.current_period_end = (
+            datetime.fromisoformat(renews_at.replace("Z", "+00:00"))
+            if renews_at else now + timedelta(days=30)
+        )
+        db.flush()
+
+        total_cents = int(attrs.get("total", 0))
+        if total_cents > 0:
+            prev_payments = db.query(UserPayment).filter(
+                UserPayment.subscription_id == existing_sub.id,
+            ).count()
+            is_first_charge = prev_payments == 0
+
+            db.add(UserPayment(
+                user_id=str(existing_sub.user_id), subscription_id=existing_sub.id,
+                amount_clp=total_cents, currency=attrs.get("currency", "USD"),
+                flow_order=order_id, flow_invoice_id=f"ls_inv_{order_id}",
+                period_start=now, period_end=existing_sub.current_period_end,
+                payment_type="recurring",
+            ))
+            db.flush()
+
+            if is_first_charge:
+                user = db.query(UserProfile).filter(UserProfile.id == existing_sub.user_id).first()
+                if user and user.email:
+                    send_purchase_confirmation(
+                        to_email=user.email,
+                        name=user.full_name or "there",
+                        plan_name="Pro Monthly",
+                        amount=f"${total_cents / 100:.2f}/month",
+                        period=f"Next billing: {existing_sub.current_period_end.strftime('%B %d, %Y')}",
+                    )
+
+        logger.info("Subscription payment renewed sub=%s user=%s amount=%s order=%s",
+                    sub_id, existing_sub.user_id, total_cents, order_id)
+        db.commit()
+        return {"status": "renewed", "subscription_id": sub_id}
+
+    # -- verify_transaction ---------------------------------------------------
+
+    async def verify_transaction(
+        self, checkout_id: str, user_id: str, db: DbSession,
+        UserProfile, UserSubscription, SubscriptionPlan,
+    ) -> dict:
+        try:
+            data = await self._get(f"/checkouts/{checkout_id}")
+        except Exception:
+            return {"status": "error", "message": "Invalid checkout ID"}
+
+        checkout = data.get("data", {})
+        attrs = self._attr(checkout)
+        custom = attrs.get("custom", {}) or {}
+
+        if attrs.get("status") != "paid":
+            return {"status": "pending", "message": "Payment not completed"}
+
+        order_id = self._id(checkout)
+        if db.query(UserSubscription).filter(UserSubscription.stripe_session_id == order_id).first():
+            return {"status": "already_processed"}
+
+        checkout_user_id = custom.get("user_id")
+        checkout_plan_slug = custom.get("plan_slug")
+
+        if not checkout_user_id or checkout_user_id != user_id:
+            return {"status": "error", "message": "Checkout does not match user"}
+
+        if not checkout_plan_slug:
+            return {"status": "error", "message": "Missing plan in checkout"}
+
+        # Simulate order_created with checkout data
+        fake_event_data = {
+            "id": order_id,
+            "attributes": {
+                "custom": custom,
+                "first_order_item": {
+                    "subscription_id": attrs.get("subscription_id", ""),
+                    "variant_name": attrs.get("variant_name", ""),
+                },
+                "total": attrs.get("total", 0),
+                "currency": attrs.get("currency", "USD"),
+            },
+        }
+        self._handle_order_created(
+            {"custom": custom, "first_order_item": attrs.get("first_order_item", {}),
+             "total": attrs.get("total", 0), "currency": attrs.get("currency", "USD")},
+            fake_event_data, db, UserProfile, UserSubscription, SubscriptionPlan,
+        )
+        return {"status": "ok"}
+
+    # -- get_subscription -----------------------------------------------------
+
+    async def get_subscription(self, user_id: str, db: DbSession, UserSubscription) -> SubscriptionInfo:
+        sub = db.query(UserSubscription).filter(
+            UserSubscription.user_id == user_id,
+            UserSubscription.status.in_(["active", "past_due", "trialing"]),
+        ).order_by(UserSubscription.current_period_end.desc()).first()
+
+        if not sub:
+            return SubscriptionInfo(has_subscription=False)
+
+        plan = sub.plan
+        is_one_time = not sub.stripe_subscription_id
+
+        card_last4 = None
+        card_brand = None
+        if sub.stripe_subscription_id and not is_one_time:
+            try:
+                data = await self._get(f"/subscriptions/{sub.stripe_subscription_id}")
+                sub_data = data.get("data", {})
+                attrs = self._attr(sub_data)
+                card_last4 = attrs.get("card_last_four")
+                card_brand = attrs.get("card_brand")
+            except Exception:
+                pass
+
+        return SubscriptionInfo(
+            has_subscription=True,
+            is_one_time=is_one_time,
+            status=sub.status,
+            current_period_start=sub.current_period_start.isoformat() if sub.current_period_start else None,
+            current_period_end=sub.current_period_end.isoformat() if sub.current_period_end else None,
+            cancel_at_period_end=not sub.auto_renew,
+            plan_name=plan.name if plan else ("Week Pass" if is_one_time else "Premium"),
+            plan_slug=plan.slug if plan else ("exam_week_pass" if is_one_time else "premium"),
+            plan_amount=plan.price_cents / 100 if plan else (4.99 if is_one_time else 14.99),
+            plan_interval=plan.interval if plan else ("week" if is_one_time else "month"),
+            card_last4=card_last4,
+            card_brand=card_brand,
+        )
+
+    # -- subscription management ----------------------------------------------
+
+    async def cancel_subscription(self, user_id: str, db: DbSession, UserSubscription) -> dict:
+        sub = db.query(UserSubscription).filter(
+            UserSubscription.user_id == user_id,
+            UserSubscription.status.in_(["active", "past_due", "trialing"]),
+        ).first()
+        if not sub:
+            raise ValueError("No active subscription found")
+
+        if sub.stripe_subscription_id:
+            try:
+                await self._delete(f"/subscriptions/{sub.stripe_subscription_id}")
+            except Exception:
+                logger.exception("LS cancel subscription failed")
+
+        sub.status = "cancel_at_period_end"
+        sub.auto_renew = False
+        db.commit()
+        logger.info("Subscription canceled user=%s sub=%s", user_id, sub.stripe_subscription_id)
+        return {"status": "ok", "canceled_at_period_end": True}
+
+    async def reactivate_subscription(self, user_id: str, db: DbSession, UserSubscription) -> dict:
+        sub = db.query(UserSubscription).filter(
+            UserSubscription.user_id == user_id,
+            UserSubscription.status == "active",
+        ).first()
+        if not sub:
+            raise ValueError("No active subscription found")
+
+        if sub.stripe_subscription_id:
+            try:
+                await self._patch(f"/subscriptions/{sub.stripe_subscription_id}", {
+                    "data": {
+                        "type": "subscriptions",
+                        "id": sub.stripe_subscription_id,
+                        "attributes": {"cancelled": False},
+                    }
+                })
+            except Exception:
+                logger.exception("LS reactivate subscription failed")
+
+        sub.auto_renew = True
+        db.commit()
+        return {"status": "ok"}
+
+    async def switch_plan(
+        self, new_plan_slug: str, user_id: str, user_email: str,
+        frontend_url: str, db: DbSession,
+        UserProfile, UserSubscription, SubscriptionPlan,
+    ) -> dict:
+        s = get_settings()
+
+        sub = db.query(UserSubscription).filter(
+            UserSubscription.user_id == user_id,
+            UserSubscription.status.in_(["active", "past_due", "trialing"]),
+        ).order_by(UserSubscription.current_period_end.desc()).first()
+
+        if not sub:
+            raise ValueError("No active subscription found")
+
+        user = db.query(UserProfile).filter(UserProfile.id == user_id).first()
+        if not user:
+            raise ValueError("User not found")
+
+        is_one_time = not sub.stripe_subscription_id
+        if is_one_time and new_plan_slug == "premium":
+            result = await self.create_checkout(
+                plan_slug="premium", user_id=user_id, user_email=user_email,
+                success_url=f"{s.frontend_url}/settings?checkout=success",
+                cancel_url=f"{s.frontend_url}/settings",
+            )
+            return {"status": "redirect_to_checkout", "url": result["url"]}
+
+        if is_one_time:
+            raise ValueError("Current plan cannot be switched")
+
+        if sub.stripe_subscription_id:
+            try:
+                new_variant_id = self._variant_id(new_plan_slug)
+                await self._patch(f"/subscriptions/{sub.stripe_subscription_id}", {
+                    "data": {
+                        "type": "subscriptions",
+                        "id": sub.stripe_subscription_id,
+                        "attributes": {
+                            "variant_id": int(new_variant_id),
+                            "invoice_immediately": True,
+                        },
+                    }
+                })
+            except Exception:
+                logger.exception("LS switch plan failed")
+
+        plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.slug == new_plan_slug).first()
+        if plan:
+            sub.plan_id = str(plan.id)
+        db.commit()
+
+        return {"status": "ok", "plan": new_plan_slug}
+
+    async def create_portal(self, user_id: str, db: DbSession, UserProfile) -> dict:
+        s = get_settings()
+
+        sub = db.query(UserSubscription).filter(
+            UserSubscription.user_id == user_id,
+            UserSubscription.status.in_(["active", "past_due", "trialing"]),
+            UserSubscription.stripe_subscription_id.isnot(None),
+        ).order_by(UserSubscription.current_period_end.desc()).first()
+
+        if sub and sub.stripe_subscription_id:
+            try:
+                data = await self._get(f"/subscriptions/{sub.stripe_subscription_id}")
+                sub_data = data.get("data", {})
+                attrs = self._attr(sub_data)
+                urls = attrs.get("urls", {})
+                customer_portal = urls.get("customer_portal")
+                if customer_portal:
+                    return {"url": customer_portal}
+                update_payment = urls.get("update_payment_method")
+                if update_payment:
+                    return {"url": update_payment}
+            except Exception:
+                logger.exception("Failed to get LS subscription urls for portal")
+
+        return {"url": f"{s.frontend_url}/settings"}
+
+    async def get_invoices(self, user_id: str, db: DbSession, UserProfile) -> list[dict]:
+        from app.models.subscription import UserPayment
+
+        payments = db.query(UserPayment).filter(
+            UserPayment.user_id == user_id,
+        ).order_by(UserPayment.created_at.desc()).limit(12).all()
+
+        return [{
+            "id": str(p.id),
+            "amount_paid": round(p.amount_clp / 100, 2),
+            "status": p.status,
+            "created": p.created_at.isoformat() if p.created_at else "",
+            "hosted_invoice_url": None,
+            "invoice_pdf": None,
+            "payment_type": p.payment_type,
+            "lemon_order_id": p.flow_order,
+        } for p in payments]

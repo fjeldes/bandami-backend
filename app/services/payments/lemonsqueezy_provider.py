@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session as DbSession
 from app.core.config import get_settings
 from app.services.payments.base import PaymentProvider, SubscriptionInfo
 from app.services.email_service import send_trial_welcome_email, send_purchase_confirmation, send_payment_failed_email
+from app.models.subscription import UserSubscription
 
 logger = logging.getLogger(__name__)
 

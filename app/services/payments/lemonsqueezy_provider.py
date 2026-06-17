@@ -475,16 +475,19 @@ class LemonSqueezyProvider(PaymentProvider):
     async def cancel_subscription(self, user_id: str, db: DbSession, UserSubscription) -> dict:
         sub = db.query(UserSubscription).filter(
             UserSubscription.user_id == user_id,
-            UserSubscription.status.in_(["active", "past_due", "trialing", "cancel_at_period_end"]),
+            UserSubscription.status.in_(["active", "past_due", "trialing"]),
         ).first()
         if not sub:
             raise ValueError("No active subscription found")
 
         if sub.stripe_subscription_id:
-            try:
-                await self._delete(f"/subscriptions/{sub.stripe_subscription_id}")
-            except Exception:
-                logger.exception("LS cancel subscription failed")
+            await self._patch(f"/subscriptions/{sub.stripe_subscription_id}", {
+                "data": {
+                    "type": "subscriptions",
+                    "id": sub.stripe_subscription_id,
+                    "attributes": {"cancelled": True},
+                }
+            })
 
         sub.status = "cancel_at_period_end"
         sub.auto_renew = False
@@ -495,7 +498,7 @@ class LemonSqueezyProvider(PaymentProvider):
     async def reactivate_subscription(self, user_id: str, db: DbSession, UserSubscription) -> dict:
         sub = db.query(UserSubscription).filter(
             UserSubscription.user_id == user_id,
-            UserSubscription.status == "active",
+            UserSubscription.status.in_(["active", "cancel_at_period_end"]),
         ).first()
         if not sub:
             raise ValueError("No active subscription found")

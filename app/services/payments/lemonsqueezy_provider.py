@@ -434,7 +434,7 @@ class LemonSqueezyProvider(PaymentProvider):
     async def get_subscription(self, user_id: str, db: DbSession, UserSubscription) -> SubscriptionInfo:
         sub = db.query(UserSubscription).filter(
             UserSubscription.user_id == user_id,
-            UserSubscription.status.in_(["active", "past_due", "trialing"]),
+            UserSubscription.status.in_(["active", "past_due", "trialing", "cancel_at_period_end"]),
         ).order_by(UserSubscription.current_period_end.desc()).first()
 
         if not sub:
@@ -475,7 +475,7 @@ class LemonSqueezyProvider(PaymentProvider):
     async def cancel_subscription(self, user_id: str, db: DbSession, UserSubscription) -> dict:
         sub = db.query(UserSubscription).filter(
             UserSubscription.user_id == user_id,
-            UserSubscription.status.in_(["active", "past_due", "trialing"]),
+            UserSubscription.status.in_(["active", "past_due", "trialing", "cancel_at_period_end"]),
         ).first()
         if not sub:
             raise ValueError("No active subscription found")
@@ -525,7 +525,7 @@ class LemonSqueezyProvider(PaymentProvider):
 
         sub = db.query(UserSubscription).filter(
             UserSubscription.user_id == user_id,
-            UserSubscription.status.in_(["active", "past_due", "trialing"]),
+            UserSubscription.status.in_(["active", "past_due", "trialing", "cancel_at_period_end"]),
         ).order_by(UserSubscription.current_period_end.desc()).first()
 
         if not sub:
@@ -576,7 +576,7 @@ class LemonSqueezyProvider(PaymentProvider):
 
         sub = db.query(UserSubscription).filter(
             UserSubscription.user_id == user_id,
-            UserSubscription.status.in_(["active", "past_due", "trialing"]),
+            UserSubscription.status.in_(["active", "past_due", "trialing", "cancel_at_period_end"]),
             UserSubscription.stripe_subscription_id.isnot(None),
         ).order_by(UserSubscription.current_period_end.desc()).first()
 

@@ -229,9 +229,13 @@ class LemonSqueezyProvider(PaymentProvider):
                 if sub:
                     raw_status = attrs.get("status")
                     new_status = self._map_status(raw_status) if raw_status else None
+                    # Prevent webhook from overwriting our intentional statuses
                     if sub.status == "canceled" and new_status == "active":
                         logger.warning("Skipping canceled→active transition for sub=%s", sub_id)
                         return {"status": "skipped", "reason": "canceled_to_active"}
+                    if sub.status == "cancel_at_period_end" and new_status in ("canceled", "cancelled"):
+                        logger.info("Skipping cancel_at_period_end→cancelled transition for sub=%s — period not ended", sub_id)
+                        return {"status": "skipped", "reason": "cancel_at_period_end_protected"}
                     if new_status:
                         sub.status = new_status
                     renews = attrs.get("renews_at")
@@ -503,7 +507,7 @@ class LemonSqueezyProvider(PaymentProvider):
     async def reactivate_subscription(self, user_id: str, db: DbSession, UserSubscription) -> dict:
         sub = db.query(UserSubscription).filter(
             UserSubscription.user_id == user_id,
-            UserSubscription.status.in_(["active", "cancel_at_period_end"]),
+            UserSubscription.status.in_(["active", "cancel_at_period_end", "canceled"]),
         ).first()
         if not sub:
             raise ValueError("No active subscription found")

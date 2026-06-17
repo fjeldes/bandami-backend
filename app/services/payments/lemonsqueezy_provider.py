@@ -211,6 +211,9 @@ class LemonSqueezyProvider(PaymentProvider):
                     UserSubscription.stripe_subscription_id == sub_id,
                 ).first()
                 if sub:
+                    if sub.status == "cancel_at_period_end":
+                        logger.info("Skipping cancelled webhook — already cancel_at_period_end sub=%s", sub_id)
+                        return {"status": "skipped"}
                     sub.status = "canceled"
                     sub.canceled_at = datetime.now(timezone.utc)
                     sub.auto_renew = False
@@ -439,7 +442,7 @@ class LemonSqueezyProvider(PaymentProvider):
     async def get_subscription(self, user_id: str, db: DbSession, UserSubscription) -> SubscriptionInfo:
         sub = db.query(UserSubscription).filter(
             UserSubscription.user_id == user_id,
-            UserSubscription.status.in_(["active", "past_due", "trialing", "cancel_at_period_end"]),
+            UserSubscription.status.in_(["active", "past_due", "trialing", "cancel_at_period_end", "canceled"]),
         ).order_by(UserSubscription.current_period_end.desc()).first()
 
         logger.info("LS get_subscription user=%s found=%s status=%s cancel=%s",

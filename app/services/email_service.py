@@ -58,7 +58,7 @@ def send_verification_email(to_email: str, name: str, token: str) -> None:
           <table width="100%" cellpadding="0" cellspacing="0" style="max-width: 480px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
             <tr>
               <td style="padding: 40px 32px 24px; text-align: center;">
-                <h1 style="margin: 0; font-size: 24px; color: #2563eb;">Bandami</h1>
+                <img src="{FRONTEND_URL}/bandami.png" alt="Bandami" style="height: 40px; width: auto;" />
               </td>
             </tr>
             <tr>
@@ -100,7 +100,7 @@ def send_password_reset_email(to_email: str, name: str, token: str) -> None:
           <table width="100%" cellpadding="0" cellspacing="0" style="max-width: 480px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
             <tr>
               <td style="padding: 40px 32px 24px; text-align: center;">
-                <h1 style="margin: 0; font-size: 24px; color: #2563eb;">Bandami</h1>
+                <img src="{FRONTEND_URL}/bandami.png" alt="Bandami" style="height: 40px; width: auto;" />
               </td>
             </tr>
             <tr>
@@ -163,7 +163,7 @@ def _build_body(subject_img: str, content_rows: str, cta_url: str, cta_text: str
       <table width="100%" cellpadding="0" cellspacing="0" style="max-width: 520px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.06);">
         <tr>
           <td style="padding: 36px 32px 20px; text-align: center; background: #f8fafc; border-bottom: 1px solid #e2e8f0;">
-            <span style="font-size: 22px; font-weight: 700; color: #2563eb; letter-spacing: -0.5px;">Bandami</span>
+            <img src="{FRONTEND_URL}/bandami.png" alt="Bandami" style="height: 40px; width: auto;" />
           </td>
         </tr>
         {content_rows}

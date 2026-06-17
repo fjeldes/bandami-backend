@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app.core.config import get_settings
 from app.services.payments.base import PaymentProvider, SubscriptionInfo
-from app.services.email_service import send_trial_welcome_email, send_purchase_confirmation
+from app.services.email_service import send_trial_welcome_email, send_purchase_confirmation, send_payment_failed_email
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +245,9 @@ class LemonSqueezyProvider(PaymentProvider):
                     logger.warning("Subscription not found for update event sub=%s", sub_id)
             return {"status": "ok"}
 
+        if event_name == "subscription_payment_failed":
+            return self._handle_subscription_payment_failed(attrs, db, UserProfile)
+
         return {"status": "unhandled_event", "type": event_name}
 
     # -- subscription_created handler -----------------------------------------
@@ -383,6 +386,29 @@ class LemonSqueezyProvider(PaymentProvider):
                     sub_id, existing_sub.user_id, total_cents, order_id)
         db.commit()
         return {"status": "renewed", "subscription_id": sub_id}
+
+    # -- subscription_payment_failed handler -----------------------------------
+
+    def _handle_subscription_payment_failed(
+        self, attrs: dict, db: DbSession, UserProfile,
+    ) -> dict:
+        sub_id = str(attrs.get("subscription_id", ""))
+        user_email = attrs.get("user_email", "")
+
+        if not user_email:
+            return {"status": "skipped", "reason": "no_email"}
+
+        user = db.query(UserProfile).filter(UserProfile.email == user_email).first()
+        if not user:
+            logger.warning("Payment failed: user not found email=%s", user_email)
+            return {"status": "skipped", "reason": "user_not_found"}
+
+        send_payment_failed_email(
+            to_email=user.email,
+            name=user.full_name or "there",
+        )
+        logger.info("Payment failed email sent user=%s sub=%s", user.id, sub_id)
+        return {"status": "ok"}
 
     # -- verify_transaction ---------------------------------------------------
 

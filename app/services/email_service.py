@@ -341,3 +341,46 @@ def send_purchase_confirmation(to_email: str, name: str, plan_name: str, amount:
         f"Payment confirmed — {plan_name}",
         _build_body(None, content, dashboard_url, "Go to Dashboard"),
     )
+
+
+def send_payment_failed_email(to_email: str, name: str) -> None:
+    """Send email when a subscription renewal payment fails."""
+    settings_url = f"{FRONTEND_URL}/settings"
+
+    content = f"""
+    <tr>
+      <td style="padding: 32px 32px 0;">
+        <table cellpadding="0" cellspacing="0">
+          <tr>
+            <td style="width: 48px; vertical-align: top;">
+              <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect width="48" height="48" rx="24" fill="#fef2f2"/>
+                <path d="M24 16V26" stroke="#dc2626" stroke-width="2.5" stroke-linecap="round"/>
+                <circle cx="24" cy="32" r="1.5" fill="#dc2626"/>
+              </svg>
+            </td>
+            <td style="padding-left: 14px; vertical-align: middle;">
+              <h2 style="font-size: 20px; color: #0f172a; margin: 0; font-weight: 700;">Payment failed, {name}</h2>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding: 16px 32px 0; font-size: 15px; color: #475569; line-height: 1.7;">
+        Your most recent subscription payment could not be processed. This can happen for a number of reasons — an expired card, insufficient funds, or a temporary issue with your bank.
+      </td>
+    </tr>
+    <tr>
+      <td style="padding: 16px 32px 0; font-size: 15px; color: #475569; line-height: 1.7;">
+        <strong>Don't worry — your access is still active.</strong> We'll try again over the next few days. To avoid interruption, please update your payment method.
+      </td>
+    </tr>
+    """
+
+    _send_email(
+        to_email,
+        "Your payment could not be processed — Bandami",
+        _build_body(None, content, settings_url, "Update Payment Method"),
+    )
+

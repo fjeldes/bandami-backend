@@ -593,9 +593,10 @@ class LemonSqueezyProvider(PaymentProvider):
                 if update_payment:
                     return {"url": update_payment}
             except Exception:
-                logger.exception("Failed to get LS subscription urls for portal")
+                logger.exception("Failed to get LS subscription urls for portal sub=%s", sub.stripe_subscription_id)
+            raise ValueError("Could not open billing portal. Please try again later.")
 
-        return {"url": f"{s.frontend_url}/settings"}
+        raise ValueError("No active subscription found. Please contact support.")
 
     async def get_invoices(self, user_id: str, db: DbSession, UserProfile) -> list[dict]:
         from app.models.subscription import UserPayment

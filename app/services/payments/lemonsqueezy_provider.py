@@ -438,6 +438,10 @@ class LemonSqueezyProvider(PaymentProvider):
             UserSubscription.status.in_(["active", "past_due", "trialing", "cancel_at_period_end"]),
         ).order_by(UserSubscription.current_period_end.desc()).first()
 
+        logger.info("LS get_subscription user=%s found=%s status=%s cancel=%s",
+                    user_id, sub is not None, sub.status if sub else "none",
+                    not sub.auto_renew if sub else "none")
+
         if not sub:
             return SubscriptionInfo(has_subscription=False)
 

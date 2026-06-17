@@ -390,85 +390,18 @@ class LemonSqueezyProvider(PaymentProvider):
         self, checkout_id: str, user_id: str, db: DbSession,
         UserProfile, UserSubscription, SubscriptionPlan,
     ) -> dict:
-        try:
-            data = await self._get(f"/checkouts/{checkout_id}")
-        except Exception:
-            return {"status": "error", "message": "Invalid checkout ID"}
-
-        checkout = data.get("data", {})
-        attrs = self._attr(checkout)
-
-        status = attrs.get("status", "")
-        logger.info("LS verify checkout_id=%s status=%s", checkout_id, status)
-        if status not in ("paid", "complete", "completed"):
-            return {"status": "pending", "message": f"Payment status: {status}"}
-
-        # Custom data is nested under checkout_data in GET /checkouts response
-        checkout_data = attrs.get("checkout_data", {}) or {}
-        custom = checkout_data.get("custom", {}) or {}
-        checkout_user_id = custom.get("user_id")
-        checkout_plan_slug = custom.get("plan_slug")
-
-        if not checkout_user_id or checkout_user_id != user_id:
-            return {"status": "error", "message": "Checkout does not match user"}
-
-        if not checkout_plan_slug:
-            return {"status": "error", "message": "Missing plan in checkout"}
-
-        # Check if webhook already provisioned
+        """LS checkouts have no status field — webhook subscription_created provisions subscriptions."""
         existing = db.query(UserSubscription).filter(
             UserSubscription.user_id == user_id,
             UserSubscription.status.in_(["active", "trialing"]),
             UserSubscription.current_period_end > datetime.now(timezone.utc),
         ).first()
         if existing:
-            logger.info("Subscription already active user=%s — webhook beat us", user_id)
+            logger.info("LS verify: subscription already active user=%s", user_id)
             return {"status": "already_processed"}
 
-        user = db.query(UserProfile).filter(UserProfile.id == user_id).first()
-        if not user:
-            return {"status": "error", "message": "User not found"}
-
-        # Provision subscription from checkout data
-        plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.slug == checkout_plan_slug).first()
-        if not plan:
-            return {"status": "skipped", "reason": "plan_not_found"}
-
-        now = datetime.now(timezone.utc)
-        order_id = str(attrs.get("order_id", checkout_id))
-        sub_id = str(attrs.get("subscription_id", ""))
-        if not sub_id:
-            first_item = attrs.get("first_order_item", {}) or {}
-            sub_id = str(first_item.get("subscription_id", ""))
-
-        new_sub = UserSubscription(
-            id=str(uuid4()), user_id=user_id, plan_id=str(plan.id),
-            status="active", current_period_start=now,
-            current_period_end=now + timedelta(days=30),
-            stripe_subscription_id=sub_id, stripe_session_id=order_id,
-        )
-        db.add(new_sub)
-
-        update = {"subscription_tier": "premium"}
-        if not user.upgraded_at:
-            update["upgraded_at"] = now
-        db.query(UserProfile).filter(UserProfile.id == user_id).update(update)
-
-        total_cents = int(attrs.get("total", 0))
-        if total_cents > 0:
-            from app.models.subscription import UserPayment
-            db.add(UserPayment(
-                user_id=user_id, subscription_id=new_sub.id,
-                amount_clp=total_cents, currency=attrs.get("currency", "USD"),
-                flow_order=order_id, flow_invoice_id=f"ls_inv_{order_id}",
-                period_start=now, period_end=now + timedelta(days=30),
-                payment_type="first_charge",
-            ))
-
-        logger.info("Subscription provisioned via verify user=%s order=%s plan=%s amount=%s",
-                    user_id, order_id, checkout_plan_slug, total_cents)
-        db.commit()
-        return {"status": "ok"}
+        logger.info("LS verify: no subscription yet user=%s, waiting for webhook", user_id)
+        return {"status": "pending", "message": "Subscription is being provisioned. Please wait a moment."}
 
     # -- get_subscription -----------------------------------------------------
 

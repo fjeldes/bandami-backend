@@ -489,22 +489,36 @@ class LemonSqueezyProvider(PaymentProvider):
         if not sub:
             raise ValueError("No active subscription found")
 
+        logger.info("LS cancel: user=%s sub_id=%s status=%s stripe_sub=%s",
+                    user_id, sub.id, sub.status, sub.stripe_subscription_id)
+
         if sub.stripe_subscription_id:
-            await self._patch(f"/subscriptions/{sub.stripe_subscription_id}", {
-                "data": {
-                    "type": "subscriptions",
-                    "id": sub.stripe_subscription_id,
-                    "attributes": {"cancelled": True},
-                }
-            })
+            try:
+                await self._patch(f"/subscriptions/{sub.stripe_subscription_id}", {
+                    "data": {
+                        "type": "subscriptions",
+                        "id": sub.stripe_subscription_id,
+                        "attributes": {"cancelled": True},
+                    }
+                })
+            except Exception:
+                logger.exception("LS cancel PATCH failed — updating DB anyway sub=%s", sub.stripe_subscription_id)
 
         sub.status = "cancel_at_period_end"
         sub.auto_renew = False
+        db.commit()
+        logger.info("LS cancel done: user=%s new_status=%s", user_id, sub.status)
         db.commit()
         logger.info("Subscription canceled user=%s sub=%s", user_id, sub.stripe_subscription_id)
         return {"status": "ok", "canceled_at_period_end": True}
 
     async def reactivate_subscription(self, user_id: str, db: DbSession, UserSubscription) -> dict:
+        all_subs = db.query(UserSubscription).filter(
+            UserSubscription.user_id == user_id,
+        ).all()
+        logger.info("LS reactivate lookup: user=%s found=%d statuses=%s",
+                    user_id, len(all_subs), [s.status for s in all_subs])
+
         sub = db.query(UserSubscription).filter(
             UserSubscription.user_id == user_id,
             UserSubscription.status.in_(["active", "cancel_at_period_end", "canceled"]),

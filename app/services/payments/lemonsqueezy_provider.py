@@ -587,9 +587,11 @@ class LemonSqueezyProvider(PaymentProvider):
                 attrs = self._attr(sub_data)
                 urls = attrs.get("urls", {})
                 customer_portal = urls.get("customer_portal")
+                update_payment = urls.get("update_payment_method")
+                logger.info("LS portal urls: customer_portal=%s update_payment=%s sub=%s",
+                           bool(customer_portal), bool(update_payment), sub.stripe_subscription_id)
                 if customer_portal:
                     return {"url": customer_portal}
-                update_payment = urls.get("update_payment_method")
                 if update_payment:
                     return {"url": update_payment}
             except Exception:

@@ -118,6 +118,13 @@ class LemonSqueezyProvider(PaymentProvider):
             return str(data.get("id", ""))
         return None
 
+    @staticmethod
+    def _map_status(raw: str) -> str:
+        """Map LemonSqueezy status values to our internal enum values."""
+        if raw == "on_trial":
+            return "trialing"
+        return raw
+
     # -- create_checkout ------------------------------------------------------
 
     async def create_checkout(
@@ -219,7 +226,8 @@ class LemonSqueezyProvider(PaymentProvider):
                     UserSubscription.stripe_subscription_id == sub_id,
                 ).first()
                 if sub:
-                    new_status = attrs.get("status")
+                    raw_status = attrs.get("status")
+                    new_status = self._map_status(raw_status) if raw_status else None
                     if sub.status == "canceled" and new_status == "active":
                         logger.warning("Skipping canceled→active transition for sub=%s", sub_id)
                         return {"status": "skipped", "reason": "canceled_to_active"}
@@ -276,7 +284,7 @@ class LemonSqueezyProvider(PaymentProvider):
             if renews_at else now + timedelta(days=30)
         )
         raw_status = attrs.get("status", "active")
-        status = "trialing" if raw_status == "on_trial" else raw_status
+        status = self._map_status(raw_status)
 
         new_sub = UserSubscription(
             id=str(uuid4()), user_id=str(user.id), plan_id=str(plan.id),

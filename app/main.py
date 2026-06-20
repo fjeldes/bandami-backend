@@ -118,3 +118,10 @@ async def privacy_policy():
     path = os.path.join(os.path.dirname(__file__), "static", "privacy.html")
     with open(path, encoding="utf-8") as f:
         return f.read()
+
+
+@app.get("/legal/refund", response_class=HTMLResponse, include_in_schema=False)
+async def refund_policy():
+    path = os.path.join(os.path.dirname(__file__), "static", "refund.html")
+    with open(path, encoding="utf-8") as f:
+        return f.read()

@@ -2,6 +2,8 @@
 .env
 .env.local
 .env.*.local
+.env.dev
+.env.prod
 
 # Python
 __pycache__/
@@ -46,5 +48,4 @@ Thumbs.db
 app/alembic/versions/*
 !app/alembic/versions/.gitkeep
 
-# Static (generated)
-app/static/*.html
+# Static (generated) — now tracked

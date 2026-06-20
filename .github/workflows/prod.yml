@@ -1,0 +1,61 @@
+name: Production CI/CD
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ielts
+          POSTGRES_PASSWORD: ielts
+          POSTGRES_DB: ielts_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest tests/ -v
+        env:
+          DATABASE_URL: postgresql://ielts:ielts@localhost:5432/ielts_test
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: success()
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: bandami-prod
+
+      - name: Trigger Cloud Build
+        run: |
+          gcloud builds submit \
+            --project=bandami-prod \
+            --config=cloudbuild.prod.yaml \
+            --substitutions=_REGION=us-central1,_SERVICE=ielts-backend,_REPOSITORY=prod-backend,_FRONTEND_URL=https://bandami.com,_BACKEND_URL=https://api.bandami.com,_BREVO_FROM_EMAIL="Bandami <contacto@bandami.com>",_LEMONSQUEEZY_STORE_ID=PENDING_LS_APPROVAL,_LEMONSQUEEZY_PRODUCT_PREMIUM=PENDING_LS_APPROVAL

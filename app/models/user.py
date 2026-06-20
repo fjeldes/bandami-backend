@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    Column, String, Boolean, DateTime, ForeignKey, Text,
+    Column, String, Integer, Boolean, DateTime, ForeignKey, Text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -33,6 +33,9 @@ class UserProfile(Base):
     role = Column(String, nullable=False, default="user")
     referral_code = Column(String, unique=True, nullable=True)
     referred_by = Column(String, nullable=True)
+    referral_discounts = Column(Integer, nullable=False, default=0)
+    upgraded_at = Column(DateTime(timezone=True), nullable=True)
+    last_active_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=_now, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
 
@@ -41,6 +44,8 @@ class UserProfile(Base):
     credit_packs = relationship("UserCreditPack", back_populates="user", lazy="dynamic")
     transactions = relationship("CreditTransaction", back_populates="user", lazy="dynamic")
     subscriptions = relationship("UserSubscription", back_populates="user", lazy="dynamic")
+    payments = relationship("UserPayment", back_populates="user", lazy="dynamic")
+    study_plans = relationship("StudyPlan", back_populates="user", lazy="dynamic")
 
 
 class RefreshToken(Base):

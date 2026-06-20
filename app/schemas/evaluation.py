@@ -10,7 +10,7 @@ ExamStatus = Literal["pending", "processing", "completed", "failed"]
 WritingTask = Literal["task1", "task2"]
 AIProvider = Literal["gemini", "openai"]
 SubscriptionTier = Literal["free", "premium"]
-EvalSource = Literal["daily", "credit_pack"]
+EvalSource = Literal["daily", "credit_pack", "pro_monthly", "free"]
 
 
 # ---- User ----
@@ -106,6 +106,7 @@ class EvaluationResponse(BaseModel):
     processing_time_ms: Optional[int] = None
     feedback_unlocks_at: datetime
     is_feedback_visible: bool = True
+    upgraded_text: Optional[str] = None
     created_at: datetime
 
 

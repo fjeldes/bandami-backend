@@ -3,8 +3,9 @@ Auth router: register, login, refresh, verify-email, logout, password reset.
 Uses SQLAlchemy ORM — no Supabase dependency.
 """
 
+import logging
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, HTTPException, Body, Depends, BackgroundTasks, Request
+from fastapi import APIRouter, HTTPException, Body, Depends, BackgroundTasks, Request, Response, Cookie
 from pydantic import BaseModel, EmailStr, Field
 from uuid import uuid4
 import hashlib
@@ -29,7 +30,24 @@ from app.services.email_service import send_verification_email, send_password_re
 from app.core.limiter import limiter
 from app.core.auth import _calc_plan_info
 
+logger = logging.getLogger("ielts.auth")
 router = APIRouter()
+
+
+def _set_refresh_cookie(response: Response, token: str, max_age: int = 60 * 60 * 24 * 30):
+    response.set_cookie(
+        key="refresh_token",
+        value=token,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=max_age,
+        path="/api/v1/auth",
+    )
+
+
+def _clear_refresh_cookie(response: Response):
+    response.delete_cookie(key="refresh_token", path="/api/v1/auth")
 
 
 class RegisterRequest(BaseModel):
@@ -99,11 +117,11 @@ def _revoke_user_tokens(db: Session, user_id: str) -> None:
 
 def _user_response(user: UserProfile, db: Session = None) -> dict:
     tier = user.subscription_tier or "free"
-    credits = 0
+    discounts = user.referral_discounts or 0
     if db:
         plan = _calc_plan_info(db, str(user.id))
         tier = plan["tier"]
-        credits = plan.get("credits_remaining", 0)
+        discounts = plan.get("referral_discounts", 0)
     return {
         "id": str(user.id),
         "email": user.email,
@@ -111,7 +129,7 @@ def _user_response(user: UserProfile, db: Session = None) -> dict:
         "subscription_tier": tier,
         "role": user.role or "user",
         "referral_code": user.referral_code or "",
-        "credits_remaining": credits,
+        "referral_discounts": discounts,
     }
 
 
@@ -151,21 +169,19 @@ async def register(
     db.commit()
 
     if referred_by:
-        for uid in [user_id, referred_by]:
-            db.add(UserCreditPack(
-                user_id=uid,
-                credits_total=2,
-                credits_used=0,
-                source="referral",
-                purchased_at=datetime.now(timezone.utc),
-                expires_at=datetime.now(timezone.utc) + timedelta(days=365),
-            ))
-        db.commit()
+        referrer = db.query(UserProfile).filter(UserProfile.id == referred_by).first()
+        if referrer:
+            referrer.referral_discounts = (referrer.referral_discounts or 0) + 1
+            new_user = db.query(UserProfile).filter(UserProfile.id == user_id).first()
+            if new_user:
+                new_user.referral_discounts = (new_user.referral_discounts or 0) + 1
+            db.commit()
 
     verification_token = create_verification_token(user_id)
 
     background_tasks.add_task(send_verification_email, body.email, body.full_name, verification_token)
 
+    logger.info("User registered uid=%s email=%s referral=%s", user_id, body.email, bool(referred_by))
     return MessageResponse(message="Account created. Please check your email to verify your account.")
 
 
@@ -178,9 +194,11 @@ async def login(
 ):
     user = db.execute(select(UserProfile).where(UserProfile.email == body.email)).scalar()
     if not user or not user.hashed_password:
+        logger.warning("Login failed: user not found email=%s", body.email)
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     if not verify_password(body.password, user.hashed_password):
+        logger.warning("Login failed: wrong password uid=%s email=%s", user.id, body.email)
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     if not user.email_confirmed_at:
@@ -191,6 +209,12 @@ async def login(
 
     _store_refresh_token(db, str(user.id), refresh_token)
 
+    # Update last_active_at
+    now = datetime.now(timezone.utc)
+    db.query(UserProfile).filter(UserProfile.id == user.id).update({UserProfile.last_active_at: now})
+    db.commit()
+
+    logger.info("Login success uid=%s email=%s tier=%s", user.id, user.email, _user_response(user, db)["subscription_tier"])
     return AuthResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -203,12 +227,13 @@ async def refresh(
     body: RefreshRequest = Body(...),
     db: Session = Depends(get_db),
 ):
+    raw_token = body.refresh_token
     try:
-        payload = _decode_token(body.refresh_token)
+        payload = _decode_token(raw_token)
     except ValueError:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
-    token_hash = _hash_token(body.refresh_token)
+    token_hash = _hash_token(raw_token)
     stored = db.execute(
         select(RefreshToken).where(
             RefreshToken.token_hash == token_hash,
@@ -263,6 +288,7 @@ async def verify_email(
     refresh_token = create_refresh_token(user_id)
     _store_refresh_token(db, user_id, refresh_token)
 
+    logger.info("Email verified uid=%s email=%s", user_id, user.email)
     return AuthResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -298,6 +324,7 @@ async def logout(
     token_hash = _hash_token(body.refresh_token)
     db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).update({"revoked": True})
     db.commit()
+    logger.info("Logout success")
     return MessageResponse(message="Logged out successfully")
 
 
@@ -336,6 +363,7 @@ async def reset_password(
     db.query(UserProfile).filter(UserProfile.id == user_id).update({"hashed_password": hashed})
     _revoke_user_tokens(db, user_id)
 
+    logger.info("Password reset uid=%s", user_id)
     return MessageResponse(message="Password reset successfully. You can now sign in with your new password.")
 
 
@@ -354,10 +382,10 @@ from urllib.parse import urlencode
 @router.get("/google/login")
 async def google_login(request: Request):
     settings = get_settings()
-    callback_url = str(request.base_url).rstrip("/") + "/api/v1/auth/google/callback"
+    host = request.headers.get("host", "")
+    callback_url = f"https://{host}/api/v1/auth/google/callback"
 
     state = uuid4().hex
-    request.session["oauth_state"] = state
 
     params = {
         "client_id": settings.google_client_id,
@@ -368,8 +396,10 @@ async def google_login(request: Request):
         "prompt": "consent",
         "state": state,
     }
-    url = f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
-    return RedirectResponse(url)
+    google_url = f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
+    response = RedirectResponse(google_url)
+    response.set_cookie("oauth_state", state, httponly=True, secure=True, samesite="lax", max_age=300)
+    return response
 
 
 @router.get("/google/callback")
@@ -381,11 +411,15 @@ async def google_callback(
 ):
     settings = get_settings()
 
-    if state and request and hasattr(request, "session"):
-        expected = request.session.pop("oauth_state", None)
-        if expected and expected != state:
-            return RedirectResponse(f"{settings.frontend_url}/auth/callback?error=invalid_state")
-    callback_url = str(request.base_url).rstrip("/") + "/api/v1/auth/google/callback"
+    if not state:
+        return RedirectResponse(f"{settings.frontend_url}/auth/callback?error=missing_state")
+
+    expected = request.cookies.get("oauth_state") if request else None
+    if expected != state:
+        return RedirectResponse(f"{settings.frontend_url}/auth/callback?error=invalid_state")
+
+    host = request.headers.get("host", "") if request else ""
+    callback_url = f"https://{host}/api/v1/auth/google/callback"
 
     token_res = requests.post(GOOGLE_TOKEN_URL, data={
         "client_id": settings.google_client_id,
@@ -439,5 +473,12 @@ async def google_callback(
     refresh_token = create_refresh_token(user_id)
     _store_refresh_token(db, user_id, refresh_token)
 
-    params = urlencode({"access_token": access_token, "refresh_token": refresh_token})
-    return RedirectResponse(f"{settings.frontend_url}/auth/callback?{params}")
+    redirect = RedirectResponse(
+        f"{settings.frontend_url}/auth/callback"
+        f"?access_token={access_token}"
+        f"&refresh_token={refresh_token}",
+        status_code=302,
+    )
+    _set_refresh_cookie(redirect, refresh_token)
+    redirect.delete_cookie("oauth_state")
+    return redirect

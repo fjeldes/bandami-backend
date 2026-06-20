@@ -29,7 +29,7 @@ EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 DO $$ BEGIN
-    CREATE TYPE subscription_status_enum AS ENUM ('active', 'canceled', 'past_due', 'expired', 'trialing');
+    CREATE TYPE subscription_status_enum AS ENUM ('active', 'canceled', 'past_due', 'expired', 'trialing', 'cancel_at_period_end');
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
@@ -39,7 +39,7 @@ EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 DO $$ BEGIN
-    CREATE TYPE eval_type_enum       AS ENUM ('daily', 'credit_pack');
+    CREATE TYPE eval_type_enum       AS ENUM ('daily', 'credit_pack', 'free', 'pro_monthly', 'admin');
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
@@ -288,7 +288,7 @@ SELECT
     COALESCE(sp.daily_eval_limit, 4) AS daily_eval_limit,
     (
         SELECT COUNT(*) FROM exams
-        WHERE user_id = up.id AND created_at::date = CURRENT_DATE AND eval_source = 'daily'
+        WHERE user_id = up.id AND created_at::date = CURRENT_DATE AND eval_source = 'daily' AND status NOT IN ('pending', 'failed')
     ) AS daily_evals_used,
     (
         SELECT COUNT(*) FROM exams WHERE user_id = up.id
@@ -316,9 +316,9 @@ GROUP BY up.id, up.subscription_tier, sp.daily_eval_limit;
 -- ============================================================
 INSERT INTO subscription_plans (slug, name, description, price_cents, interval, daily_eval_limit, provider, feedback_delay_hours, sort_order)
 VALUES
-    ('free', 'Free', '4 daily evaluations with basic AI. Full feedback within 24h.', 0, 'month', 4, 'gemini', 24, 1),
-    ('exam_week_pass', 'Exam Week Pass', '7-day full access with advanced AI. Perfect if your exam is this week.', 499, 'one_time', 30, 'openai', 0, 5),
-    ('premium', 'Premium', '30 daily evaluations with advanced AI. Instant feedback. History & progress tracking.', 1499, 'month', 30, 'openai', 0, 10),
+    ('free', 'Free', '3 daily evaluations. Speaking Part 1 + Writing. Instant band score.', 0, 'month', 3, 'gemini', 0, 1),
+    ('exam_week_pass', 'Exam Week Pass', '7-day access with 10 evaluations/day. Includes all modules.', 299, 'one_time', 10, 'openai', 0, 5),
+    ('premium', 'Pro', 'Unlimited practice. Detailed analysis. Personalized study plans. Progress tracking.', 1499, 'month', 30, 'openai', 0, 10),
     ('credit_pack_10', 'Pack 10 Credits', '10 extra evaluations with no daily limit. Advanced AI.', 799, 'one_time', 0, 'openai', 0, 20),
     ('credit_pack_25', 'Pack 25 Credits', '25 extra evaluations with no daily limit. Advanced AI. Best value.', 1499, 'one_time', 0, 'openai', 0, 21)
 ON CONFLICT (slug) DO NOTHING;

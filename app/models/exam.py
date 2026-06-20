@@ -66,6 +66,7 @@ class Evaluation(Base):
     tokens_used = Column(Integer, nullable=True)
     processing_time_ms = Column(Integer, nullable=True)
     feedback_unlocks_at = Column(DateTime(timezone=True), default=_now, nullable=False)
+    upgraded_text = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=_now, nullable=False)
 
     exam = relationship("Exam", back_populates="evaluation")

@@ -1,3 +1,4 @@
+import logging
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
@@ -13,6 +14,7 @@ from app.core.logging_config import setup_logging
 from app.db.deps import get_db
 from app.api.v1.routers import writing, speaking, reading, listening, users, auth, payments, admin
 
+logger = logging.getLogger("ielts.startup")
 settings = get_settings()
 setup_logging()
 
@@ -25,6 +27,23 @@ app = FastAPI(
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.on_event("startup")
+async def recover_stale_exams():
+    """Reset exams stuck in 'processing' for more than 30 minutes back to 'failed'."""
+    from app.db.engine import engine
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(
+                text("UPDATE exams SET status = 'failed' WHERE status = 'processing' AND created_at < NOW() - INTERVAL '30 minutes'")
+            )
+            recovered = result.rowcount
+            if recovered:
+                logger.info("Recovered %d stale 'processing' exams to 'failed'", recovered)
+            conn.commit()
+    except Exception as e:
+        logger.error("Failed to recover stale exams: %s", e)
 
 
 @app.middleware("http")
@@ -97,5 +116,12 @@ async def terms_of_service():
 @app.get("/legal/privacy", response_class=HTMLResponse, include_in_schema=False)
 async def privacy_policy():
     path = os.path.join(os.path.dirname(__file__), "static", "privacy.html")
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+@app.get("/legal/refund", response_class=HTMLResponse, include_in_schema=False)
+async def refund_policy():
+    path = os.path.join(os.path.dirname(__file__), "static", "refund.html")
     with open(path, encoding="utf-8") as f:
         return f.read()

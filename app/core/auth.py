@@ -10,9 +10,8 @@ from sqlalchemy import select, func, text
 from app.db.deps import get_db
 from app.core.security import decode_access_token
 from app.services.providers import get_provider
-from app.services.providers.base import AbstractAIProvider
 from app.models.user import UserProfile
-from app.models.subscription import UserCreditPack, UserSubscription
+from app.models.subscription import UserSubscription
 from datetime import datetime, timezone, timedelta
 
 
@@ -38,81 +37,48 @@ async def get_current_user(
 
 
 def _calc_plan_info(db: Session, user_id: str) -> dict:
-    """Calculate real-time tier: subscription → credits → free."""
+    """Calculate tier: subscription → free. No credit packs."""
     from app.core.config import get_settings
     settings = get_settings()
 
     is_admin = db.execute(select(UserProfile.role).where(UserProfile.id == user_id)).scalar() == "admin"
     if is_admin:
-        return {
-            "tier": "premium",
-            "provider": "gemini",
-            "daily_eval_limit": 999,
-            "feedback_delay_hours": 0,
-            "credits_remaining": 0,
-            "is_admin": True,
-        }
+        return {"tier": "premium", "provider": "gemini", "daily_eval_limit": 999, "feedback_delay_hours": 0, "referral_discounts": 0, "is_admin": True}
 
     now = datetime.now(timezone.utc)
-
-    result = None
+    user = db.query(UserProfile).filter(UserProfile.id == user_id).first()
 
     sub = (
         db.query(UserSubscription)
         .filter(
             UserSubscription.user_id == user_id,
-            UserSubscription.status == "active",
+            UserSubscription.status.in_(["active", "trialing"]),
             UserSubscription.current_period_end > now,
         )
         .order_by(UserSubscription.current_period_end.desc())
         .first()
     )
 
+    provider = "openai"
+    if settings.environment == "development":
+        provider = "gemini"
+
     if sub:
-        plan = sub.plan
-        result = {
+        return {
             "tier": "premium",
-            "provider": plan.provider if plan else "openai",
-            "daily_eval_limit": plan.daily_eval_limit if plan else 30,
+            "provider": provider,
             "feedback_delay_hours": 0,
-            "credits_remaining": 0,
+            "referral_discounts": user.referral_discounts if user else 0,
             "is_admin": False,
         }
-    else:
-        packs = (
-            db.query(UserCreditPack)
-            .filter(
-                UserCreditPack.user_id == user_id,
-                UserCreditPack.credits_used < UserCreditPack.credits_total,
-                (UserCreditPack.expires_at == None) | (UserCreditPack.expires_at > now),
-            )
-            .all()
-        )
-        total_remaining = sum(p.credits_total - p.credits_used for p in packs)
 
-        if total_remaining > 0:
-            result = {
-                "tier": "credit_pack",
-                "provider": "openai",
-                "daily_eval_limit": 999,
-                "feedback_delay_hours": 0,
-                "credits_remaining": total_remaining,
-                "is_admin": False,
-            }
-        else:
-            result = {
-                "tier": "free",
-                "provider": "gemini",
-                "daily_eval_limit": 4,
-                "feedback_delay_hours": 24,
-                "credits_remaining": 0,
-                "is_admin": False,
-            }
-
-    if settings.environment == "development":
-        result["provider"] = "gemini"
-
-    return result
+    return {
+        "tier": "free",
+        "provider": "gemini",
+        "feedback_delay_hours": 0,
+        "referral_discounts": user.referral_discounts if user else 0,
+        "is_admin": False,
+    }
 
 
 async def get_user_plan_info(
@@ -127,53 +93,36 @@ async def check_daily_limit(
     db: Session = Depends(get_db),
     user_plan: dict = Depends(get_user_plan_info),
 ) -> dict:
-    from app.core.config import get_settings
-    settings = get_settings()
-
-    if settings.environment == "development":
-        user_plan["eval_source"] = "daily"
-        user_plan["daily_used"] = 0
-        return user_plan
-
     if user_plan.get("is_admin"):
-        user_plan["eval_source"] = "daily"
-        user_plan["daily_used"] = 0
+        user_plan["eval_source"] = "admin"
         return user_plan
 
-    tier = user_plan.get("tier", "free")
+    now = datetime.now(timezone.utc)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-    if tier == "credit_pack":
-        has_credit = db.scalar(text("SELECT consume_credit_pack(:uid)"), {"uid": user_id}) or False
-        if not has_credit:
-            raise HTTPException(status_code=402, detail="No credits remaining. Purchase a credit pack to continue.")
-        user_plan["eval_source"] = "credit_pack"
-        user_plan["daily_used"] = 0
+    if user_plan.get("tier") == "premium":
+        used = db.scalar(
+            text("SELECT COUNT(*) FROM exams WHERE user_id = :uid AND created_at >= :month_start AND eval_source = 'pro_monthly' AND status NOT IN ('pending', 'failed')"),
+            {"uid": user_id, "month_start": month_start},
+        ) or 0
+
+        if used < 30:
+            user_plan["eval_source"] = "pro_monthly"
+            return user_plan
+
+        user_plan["tier"] = "free"
+        user_plan["provider"] = "gemini"
+        user_plan["eval_source"] = "free"
         return user_plan
 
-    used = db.scalar(
-        text("SELECT COUNT(*) FROM exams WHERE user_id = :uid AND created_at::date = CURRENT_DATE AND eval_source = 'daily' AND status NOT IN ('pending', 'failed')"),
-        {"uid": user_id},
-    ) or 0
-    limit = user_plan["daily_eval_limit"]
-
-    if used >= limit:
-        has_credit = db.scalar(text("SELECT consume_credit_pack(:uid)"), {"uid": user_id}) or False
-        if not has_credit:
-            raise HTTPException(
-                status_code=402,
-                detail=f"Daily limit reached ({used}/{limit}). Upgrade to Premium or purchase a credit pack.",
-            )
-        user_plan["eval_source"] = "credit_pack"
-    else:
-        user_plan["eval_source"] = "daily"
-
-    user_plan["daily_used"] = used
+    user_plan["eval_source"] = "free"
     return user_plan
 
 
 async def get_ai_provider(
     user_plan: dict = Depends(check_daily_limit),
-) -> AbstractAIProvider:
+) -> object:
+    """Return AI provider instance. Returns objects implementing SpeakingEvaluator, WritingEvaluator, etc."""
     provider_name = user_plan["provider"]
     return get_provider(provider_name)
 

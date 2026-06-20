@@ -1,11 +1,9 @@
+import json
 import logging
 import sys
 from app.core.config import get_settings
 
 settings = get_settings()
-
-LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s rid=%(request_id)s — %(message)s"
-DATE_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
 
 class RequestIDFilter(logging.Filter):
@@ -15,9 +13,32 @@ class RequestIDFilter(logging.Filter):
         return True
 
 
+class JSONFormatter(logging.Formatter):
+    def format(self, record):
+        from app.core.context import get_request_id
+        return json.dumps({
+            "timestamp": self.formatTime(record, "%Y-%m-%dT%H:%M:%SZ"),
+            "severity": record.levelname,
+            "logger": record.name,
+            "request_id": get_request_id() or "-",
+            "message": record.getMessage(),
+            "module": record.module,
+            "line": record.lineno,
+        }, default=str)
+
+
 def setup_logging():
     handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=DATE_FORMAT))
+
+    if settings.environment == "production":
+        handler.setFormatter(JSONFormatter())
+    else:
+        fmt = logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s rid=%(request_id)s — %(message)s",
+            datefmt="%Y-%m-%dT%H:%M:%SZ",
+        )
+        handler.setFormatter(fmt)
+
     handler.addFilter(RequestIDFilter())
 
     root = logging.getLogger()

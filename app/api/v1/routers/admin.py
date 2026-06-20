@@ -3,7 +3,7 @@ Admin router: stats, users, questions, plans management.
 Uses SQLAlchemy ORM.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
@@ -345,3 +345,87 @@ async def update_settings(body: AppConfigUpdate, db: Session = Depends(get_db)):
         db.execute(text("UPDATE app_config SET value = :val, updated_at = NOW() WHERE key = :key"), {"val": value, "key": key})
     db.commit()
     return {"status": "ok"}
+
+
+# ---- Analytics (DAU, conversions, tier breakdown) ----
+
+@router.get("/analytics")
+async def admin_analytics(db: Session = Depends(get_db)):
+    now = datetime.now(timezone.utc)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    total_users = db.scalar(text("SELECT COUNT(*) FROM user_profiles")) or 0
+    premium = db.scalar(text("SELECT COUNT(*) FROM user_profiles WHERE subscription_tier = 'premium'")) or 0
+    free = total_users - premium
+
+    active_this_month = db.scalar(text(
+        "SELECT COUNT(*) FROM user_profiles WHERE last_active_at >= :month_start"
+    ), {"month_start": month_start}) or 0
+    active_premium = db.scalar(text(
+        "SELECT COUNT(*) FROM user_profiles WHERE last_active_at >= :month_start AND subscription_tier = 'premium'"
+    ), {"month_start": month_start}) or 0
+    active_free = active_this_month - active_premium
+
+    conversions_total = db.scalar(text("SELECT COUNT(*) FROM user_profiles WHERE upgraded_at IS NOT NULL")) or 0
+    conversions_this_month = db.scalar(text(
+        "SELECT COUNT(*) FROM user_profiles WHERE upgraded_at >= :month_start"
+    ), {"month_start": month_start}) or 0
+
+    dau = db.execute(text("""
+        SELECT d::date AS day,
+               COUNT(DISTINCT up.id) FILTER (WHERE up.subscription_tier = 'free') AS free_users,
+               COUNT(DISTINCT up.id) FILTER (WHERE up.subscription_tier = 'premium') AS premium_users
+        FROM generate_series(
+            :start_date::date,
+            CURRENT_DATE,
+            '1 day'::interval
+        ) d
+        LEFT JOIN user_profiles up ON up.last_active_at::date = d::date
+        WHERE d >= CURRENT_DATE - INTERVAL '29 days'
+        GROUP BY d::date
+        ORDER BY d::date
+    """), {"start_date": now - timedelta(days=29)}).fetchall()
+
+    dau_data = [{"day": str(r[0]), "free": r[1], "premium": r[2]} for r in dau]
+
+    evals_daily = db.execute(text("""
+        SELECT d::date AS day,
+               COUNT(e.id) FILTER (WHERE up.subscription_tier = 'free') AS free_evals,
+               COUNT(e.id) FILTER (WHERE up.subscription_tier = 'premium') AS premium_evals
+        FROM generate_series(
+            :start_date::date,
+            CURRENT_DATE,
+            '1 day'::interval
+        ) d
+        LEFT JOIN exams e ON e.created_at::date = d::date AND e.status = 'completed'
+        LEFT JOIN user_profiles up ON up.id = e.user_id
+        WHERE d >= CURRENT_DATE - INTERVAL '29 days'
+        GROUP BY d::date
+        ORDER BY d::date
+    """), {"start_date": now - timedelta(days=29)}).fetchall()
+
+    evals_data = [{"day": str(r[0]), "free": r[1], "premium": r[2]} for r in evals_daily]
+
+    monthly_evals_free = db.scalar(text(
+        "SELECT COUNT(*) FROM exams e JOIN user_profiles up ON up.id = e.user_id WHERE e.created_at >= :month_start AND e.status = 'completed' AND up.subscription_tier = 'free'"
+    ), {"month_start": month_start}) or 0
+    monthly_evals_premium = db.scalar(text(
+        "SELECT COUNT(*) FROM exams e JOIN user_profiles up ON up.id = e.user_id WHERE e.created_at >= :month_start AND e.status = 'completed' AND up.subscription_tier = 'premium'"
+    ), {"month_start": month_start}) or 0
+
+    return {
+        "summary": {
+            "total_users": total_users,
+            "free_users": free,
+            "premium_users": premium,
+            "active_this_month": active_this_month,
+            "active_free": active_free,
+            "active_premium": active_premium,
+            "conversions_total": conversions_total,
+            "conversions_this_month": conversions_this_month,
+            "monthly_evals_free": monthly_evals_free,
+            "monthly_evals_premium": monthly_evals_premium,
+        },
+        "dau": dau_data,
+        "evaluations_per_day": evals_data,
+    }

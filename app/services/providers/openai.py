@@ -1,143 +1,133 @@
+# ============================================================
+# OpenAI Provider (SOLID refactor)
+# Implements focused protocols, uses extracted prompts + JsonParser.
+# ============================================================
+
 import json
 import time
+import asyncio
+import logging
 from openai import AsyncOpenAI
 from app.core.config import get_settings
-from app.services.providers.base import AbstractAIProvider, AIEvaluationResult
+from app.services.providers.base import (
+    AIEvaluationResult,
+    WritingEvaluator,
+    BaseSpeakingEvaluator,
+    ReadingEvaluator,
+    ListeningEvaluator,
+    validate_writing_criteria,
+)
+from app.services.prompts.writing import WRITING_OPENAI, WRITING_PREMIUM
 
 settings = get_settings()
-
-WRITING_PROMPT = """You are an official IELTS examiner. Evaluate the following essay according to the official IELTS Writing band descriptors.
-
-Evaluate based on these 4 criteria (each scored 0-9 in 0.5 increments):
-1. Task Response (TR): How well the candidate addresses all parts of the task, presents a clear position, and supports ideas
-2. Coherence and Cohesion (CC): Logical organization, clear progression, paragraphing, cohesive devices used appropriately
-3. Lexical Resource (LR): Range, accuracy, and appropriateness of vocabulary; natural collocations and less common lexis
-4. Grammatical Range and Accuracy (GRA): Range and accuracy of grammatical structures; error-free sentences frequency
-
-Return ONLY valid JSON:
-{
-  "overall_band": 6.5,
-  "criteria_scores": {
-    "task_response": {"score": 6.0, "comment": "Detailed analysis of task response..."},
-    "coherence_and_cohesion": {"score": 6.5, "comment": "Detailed analysis of organization..."},
-    "lexical_resource": {"score": 7.0, "comment": "Detailed analysis of vocabulary..."},
-    "grammatical_range_and_accuracy": {"score": 6.5, "comment": "Detailed analysis of grammar..."}
-  },
-  "general_feedback": "2-3 sentence high-level overall assessment. Be general, no specific corrections or word suggestions.",
-  "detailed_feedback": "Comprehensive overall assessment with specific improvement suggestions...",
-  "grammar_corrections": [
-    {"original": "the exact error from the text", "corrected": "the corrected version", "explanation": "why this correction improves the text"}
-  ]
-}
-general_feedback must be general and brief (max 3 sentences). detailed_feedback must be comprehensive.
-Be strict, precise, and follow IELTS official descriptors. Do not inflate scores. Support every score with evidence from the text."""
-
-SPEAKING_PROMPT = """You are an official IELTS Speaking examiner. Evaluate this transcript according to official band descriptors.
-
-Evaluate based on 4 criteria (each 0-9, 0.5 increments):
-1. Fluency and Coherence (FC): Speech rate, hesitation, logical connectors, topic development
-2. Lexical Resource (LR): Vocabulary range, paraphrasing, idiomatic language, precision
-3. Grammatical Range and Accuracy (GRA): Sentence complexity, error frequency, tense control
-4. Pronunciation (P): Inferred from transcription patterns, word stress, intonation indicators
-
-Return ONLY valid JSON:
-{
-  "overall_band": 6.0,
-  "criteria_scores": {
-    "fluency_and_coherence": {"score": 6.0, "comment": "Analysis of speech flow..."},
-    "lexical_resource": {"score": 6.0, "comment": "Analysis of vocabulary..."},
-    "grammatical_range_and_accuracy": {"score": 5.5, "comment": "Analysis of grammar..."},
-    "pronunciation": {"score": 6.0, "comment": "Inferred from transcription patterns..."}
-  },
-  "general_feedback": "2-3 sentence high-level speaking assessment. Be general, no specific corrections.",
-  "detailed_feedback": "Comprehensive speaking assessment with improvement roadmap...",
-  "grammar_corrections": [
-    {"original": "exact spoken error transcribed", "corrected": "corrected form", "explanation": "grammar rule or improvement rationale"}
-  ]
-}
-general_feedback must be general and brief (max 3 sentences). detailed_feedback must be comprehensive.
-Be strict and objective. Use official IELTS Speaking descriptors."""
+logger = logging.getLogger("ielts.openai")
 
 
-class OpenAIProvider(AbstractAIProvider):
+class OpenAIProvider(BaseSpeakingEvaluator, WritingEvaluator, ReadingEvaluator, ListeningEvaluator):
 
     def __init__(self):
-        self.client = AsyncOpenAI(api_key=settings.openai_api_key)
+        self._client = None
+
+    def _get_client(self):
+        if self._client is None:
+            if not settings.openai_api_key:
+                raise ValueError("OpenAI API key not configured")
+            self._client = AsyncOpenAI(api_key=settings.openai_api_key)
+        return self._client
 
     @property
     def provider_name(self) -> str:
         return "openai"
 
+    # ---- Writing -----------------------------------------------------------
+
     async def evaluate_writing(self, text: str, task_type: str, detailed: bool = True) -> AIEvaluationResult:
         start = time.time()
+        is_premium = detailed
         task_label = "Task 1 (Report/Letter)" if task_type == "task1" else "Task 2 (Essay)"
+        prompt = WRITING_PREMIUM if is_premium else WRITING_OPENAI
+        max_tokens = 8192 if is_premium else 4096
 
-        response = await self.client.chat.completions.create(
+        response = await self._get_client().chat.completions.create(
             model="gpt-4o",
             messages=[
-                {"role": "system", "content": WRITING_PROMPT},
-                {"role": "user", "content": f"IELTS Writing {task_label}\n\nEssay:\n{text}"},
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": f"IELTS Writing {task_label}\n\nEssay ({len(text.split())} words):\n{text}"},
             ],
             temperature=0.3,
             response_format={"type": "json_object"},
-            max_tokens=2000,
+            max_tokens=max_tokens,
         )
 
         elapsed = int((time.time() - start) * 1000)
         result = json.loads(response.choices[0].message.content)
+        criteria = result.get("criteria_scores", {})
+        missing = validate_writing_criteria(criteria, premium=is_premium)
+        if missing:
+            logger.warning(f"Writing criteria missing: {missing}")
 
         return AIEvaluationResult(
             overall_band=result["overall_band"],
-            criteria_scores=result["criteria_scores"],
+            criteria_scores=criteria,
             general_feedback=result.get("general_feedback", result.get("detailed_feedback", "")),
-            detailed_feedback=result["detailed_feedback"],
+            detailed_feedback=result.get("detailed_feedback", "") if is_premium else result.get("detailed_feedback", result.get("general_feedback", "")),
             grammar_corrections=result.get("grammar_corrections", []),
             model=response.model,
             tokens=response.usage.total_tokens,
             processing_time_ms=elapsed,
         )
 
+    # ---- Speaking (template method from BaseSpeakingEvaluator) -------------
+
+    def _get_speaking_config(self, is_premium: bool) -> tuple[str, int]:
+        from app.services.prompts.speaking import SPEAKING_PREMIUM, SPEAKING_FREE
+        if is_premium:
+            return SPEAKING_PREMIUM, 8192
+        return SPEAKING_FREE, 4096
+
+    async def _call_ai(self, prompt: str, transcription: str, max_tokens: int, temperature: float):
+        return await self._get_client().chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": f"IELTS Speaking Response:\n{transcription}"},
+            ],
+            temperature=temperature,
+            response_format={"type": "json_object"},
+            max_tokens=max_tokens,
+        )
+
+    def _parse_response(self, response) -> dict:
+        return json.loads(response.choices[0].message.content)
+
+    def _build_result(self, parsed: dict, criteria: dict, transcription: str, response) -> AIEvaluationResult:
+        return AIEvaluationResult(
+            overall_band=parsed["overall_band"],
+            criteria_scores=criteria,
+            general_feedback=parsed.get("general_feedback", parsed.get("detailed_feedback", "")),
+            detailed_feedback=parsed.get("detailed_feedback", ""),
+            grammar_corrections=parsed.get("grammar_corrections", []),
+            transcription=transcription,
+            model=response.model,
+            tokens=response.usage.total_tokens,
+            processing_time_ms=0,
+        )
+
+    # ---- Transcription -----------------------------------------------------
+
     async def transcribe_audio(self, audio_bytes: bytes, filename: str) -> str:
-        response = await self.client.audio.transcriptions.create(
+        response = await self._get_client().audio.transcriptions.create(
             model="whisper-1",
             file=(filename, audio_bytes, self._get_mime_type(filename)),
             language="en",
         )
         return response.text
 
-    async def evaluate_speaking(self, transcription: str, detailed: bool = True) -> AIEvaluationResult:
-        start = time.time()
-
-        response = await self.client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": SPEAKING_PROMPT},
-                {"role": "user", "content": f"IELTS Speaking Response Transcript:\n{transcription}"},
-            ],
-            temperature=0.3,
-            response_format={"type": "json_object"},
-            max_tokens=2000,
-        )
-
-        elapsed = int((time.time() - start) * 1000)
-        result = json.loads(response.choices[0].message.content)
-        result["transcription"] = transcription
-
-        return AIEvaluationResult(
-            overall_band=result["overall_band"],
-            criteria_scores=result["criteria_scores"],
-            general_feedback=result.get("general_feedback", result.get("detailed_feedback", "")),
-            detailed_feedback=result["detailed_feedback"],
-            grammar_corrections=result.get("grammar_corrections", []),
-            transcription=transcription,
-            model=response.model,
-            tokens=response.usage.total_tokens,
-            processing_time_ms=elapsed,
-        )
+    # ---- Reading (stub — "Coming Soon") ------------------------------------
 
     async def evaluate_reading(self, answers: dict, detailed: bool = True) -> AIEvaluationResult:
         start = time.time()
-        response = await self.client.chat.completions.create(
+        response = await self._get_client().chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": (
@@ -162,28 +152,38 @@ class OpenAIProvider(AbstractAIProvider):
             model=response.model, tokens=response.usage.total_tokens, processing_time_ms=elapsed,
         )
 
+    # ---- Listening (stub — "Coming Soon") ----------------------------------
+
     async def evaluate_listening(self, answers: dict, detailed: bool = True) -> AIEvaluationResult:
         start = time.time()
-        response = await self.client.chat.completions.create(
+        response = await self._get_client().chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are an IELTS Listening examiner. Evaluate answers and return JSON: {\"overall_band\": 6.5, \"criteria_scores\": {\"accuracy\": {\"score\": 6.5, \"comment\": \"...\"}}, \"general_feedback\": \"2-3 sentence assessment.\", \"detailed_feedback\": \"Detailed analysis.\", \"grammar_corrections\": []}"},
+                {"role": "system", "content": (
+                    "You are an IELTS Listening examiner. Evaluate answers and return JSON: "
+                    '{"overall_band": 6.5, "criteria_scores": {"accuracy": {"score": 6.5, "comment": "..."}}, '
+                    '"general_feedback": "2-3 sentence assessment.", "detailed_feedback": "Detailed analysis.", '
+                    '"grammar_corrections": []}'
+                )},
                 {"role": "user", "content": f"Student answers: {answers}"},
             ],
             temperature=0.3, response_format={"type": "json_object"}, max_tokens=2000,
         )
         elapsed = int((time.time() - start) * 1000)
         result = json.loads(response.choices[0].message.content)
-        return AIEvaluationResult(overall_band=result["overall_band"], criteria_scores=result.get("criteria_scores", {}), general_feedback=result.get("general_feedback", result.get("detailed_feedback", "")), detailed_feedback=result["detailed_feedback"], grammar_corrections=[], model=response.model, tokens=response.usage.total_tokens, processing_time_ms=elapsed)
+        return AIEvaluationResult(
+            overall_band=result["overall_band"],
+            criteria_scores=result.get("criteria_scores", {}),
+            general_feedback=result.get("general_feedback", result.get("detailed_feedback", "")),
+            detailed_feedback=result["detailed_feedback"],
+            grammar_corrections=[],
+            model=response.model, tokens=response.usage.total_tokens, processing_time_ms=elapsed,
+        )
 
     @staticmethod
     def _get_mime_type(filename: str) -> str:
         ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "webm"
         return {
-            "webm": "audio/webm",
-            "mp3": "audio/mpeg",
-            "mp4": "audio/mp4",
-            "m4a": "audio/mp4",
-            "wav": "audio/wav",
-            "ogg": "audio/ogg",
+            "webm": "audio/webm", "mp3": "audio/mpeg", "mp4": "audio/mp4",
+            "m4a": "audio/mp4", "wav": "audio/wav", "ogg": "audio/ogg",
         }.get(ext, "audio/webm")

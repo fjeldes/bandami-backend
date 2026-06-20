@@ -10,12 +10,20 @@ from app.db.engine import Base
 from app.models.user import UserProfile
 from app.models.subscription import SubscriptionPlan, UserSubscription
 from app.core.security import hash_password, create_access_token
-from app.services.providers.base import AIEvaluationResult, AbstractAIProvider
+from app.services.providers.base import (
+    AIEvaluationResult,
+    WritingEvaluator,
+    SpeakingEvaluator,
+    ReadingEvaluator,
+    ListeningEvaluator,
+)
 from app.main import app
 from app.db import deps
 from sqlalchemy import create_engine as sa_create_engine, text
 
-TEST_DATABASE_URL = "postgresql://ielts:ielts@db:5432/ielts_test"
+import os
+
+TEST_DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://ielts:ielts@db:5432/ielts_test")
 
 VIEW_SQL = """
 CREATE OR REPLACE VIEW user_dashboard_stats AS
@@ -36,7 +44,7 @@ GROUP BY up.id, up.subscription_tier;
 """
 
 
-class MockAIProvider(AbstractAIProvider):
+class MockAIProvider(WritingEvaluator, SpeakingEvaluator, ReadingEvaluator, ListeningEvaluator):
     @property
     def provider_name(self) -> str: return "gemini"
 

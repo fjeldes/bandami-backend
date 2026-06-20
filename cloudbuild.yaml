@@ -1,0 +1,65 @@
+# Google Cloud Build — dev environment
+# Triggered on push to develop branch
+# Builds Docker, runs migrations, deploys to Cloud Run (dev service)
+# Env vars come from Secret Manager (dev- prefixed names)
+
+steps:
+  # 1. Build Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$COMMIT_SHA'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:latest'
+      - '.'
+    dir: '.'
+
+  # 2. Push to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$COMMIT_SHA'
+
+  # 3. Deploy to Cloud Run (dev)
+  # Migrations run automatically on startup via start.sh → migrate.py
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - '${_SERVICE}'
+      - '--image'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$COMMIT_SHA'
+      - '--region'
+      - '${_REGION}'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--cpu-boost'
+      - '--port'
+      - '8080'
+      - '--memory'
+      - '512Mi'
+      - '--timeout'
+      - '300'
+      - '--set-secrets'
+      - 'DATABASE_URL=DEV_DATABASE_URL:latest,OPENAI_API_KEY=DEV_OPENAI_API_KEY:latest,GEMINI_API_KEY=DEV_GEMINI_API_KEY:latest,JWT_SECRET_KEY=DEV_JWT_SECRET_KEY:latest,BREVO_API_KEY=DEV_BREVO_API_KEY:latest,FLOW_API_KEY=DEV_FLOW_API_KEY:latest,FLOW_SECRET_KEY=DEV_FLOW_SECRET_KEY:latest,LEMONSQUEEZY_API_KEY=DEV_LEMONSQUEEZY_API_KEY:latest,LEMONSQUEEZY_WEBHOOK_SECRET=DEV_LEMONSQUEEZY_WEBHOOK_SECRET:latest,GOOGLE_CLIENT_ID=DEV_GOOGLE_CLIENT_ID:latest,GOOGLE_CLIENT_SECRET=DEV_GOOGLE_CLIENT_SECRET:latest'
+      - '--set-env-vars'
+      - 'ENVIRONMENT=development,DEBUG=true,FRONTEND_URL=${_FRONTEND_URL},BACKEND_URL=${_BACKEND_URL},CORS_ORIGINS=["${_FRONTEND_URL}"],PAYMENT_PROVIDER=lemonsqueezy,FLOW_ENVIRONMENT=sandbox,LEMONSQUEEZY_STORE_ID=409564,LEMONSQUEEZY_PRODUCT_PREMIUM=1150667,BREVO_FROM_EMAIL=${_BREVO_FROM_EMAIL}'
+
+images:
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$COMMIT_SHA'
+
+substitutions:
+  _REGION: us-central1
+  _SERVICE: dev-ielts-backend
+  _REPOSITORY: dev-backend
+  _FRONTEND_URL: https://dev.bandami.com
+  _BACKEND_URL: https://dev-api.bandami.com
+  _BREVO_FROM_EMAIL: Bandami Dev <contacto@bandami.com>
+
+options:
+  defaultLogsBucketBehavior: REGIONAL_USER_OWNED_BUCKET
+
+timeout: 900s

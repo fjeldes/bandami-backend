@@ -48,6 +48,19 @@ steps:
       - '--set-env-vars'
       - 'ENVIRONMENT=development,DEBUG=true,FRONTEND_URL=${_FRONTEND_URL},BACKEND_URL=${_BACKEND_URL},CORS_ORIGINS=["${_FRONTEND_URL}"],PAYMENT_PROVIDER=lemonsqueezy,FLOW_ENVIRONMENT=sandbox,LEMONSQUEEZY_STORE_ID=409564,LEMONSQUEEZY_PRODUCT_PREMIUM=1150667,BREVO_FROM_EMAIL=${_BREVO_FROM_EMAIL}'
 
+  # 4. Allow unauthenticated access
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'services'
+      - 'add-iam-policy-binding'
+      - '${_SERVICE}'
+      - '--member=allUsers'
+      - '--role=roles/run.invoker'
+      - '--region'
+      - '${_REGION}'
+
 images:
   - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:${_COMMIT_SHA}'
 

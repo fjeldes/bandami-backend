@@ -135,9 +135,9 @@ class PolarProvider(PaymentProvider):
                 provided = part[3:]
 
         logger.info(
-            "Polar webhook diagnostic: id=%s ts=%s sig_header=%s expected=%s provided=%s match=%s",
-            msg_id, ts, sig_h[:60], expected[:40], provided[:40],
-            hmac.compare_digest(expected, provided),
+            "Polar webhook diagnostic: id=%s ts=%s expected=%s provided=%s payload=%s",
+            msg_id, ts, expected[:40], provided[:40],
+            payload.decode()[:500],
         )
 
         if not msg_id or not ts or not provided:

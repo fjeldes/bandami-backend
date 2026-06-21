@@ -8,6 +8,7 @@ from app.services.payments.stripe_provider import StripeProvider
 from app.services.payments.paddle_provider import PaddleProvider
 from app.services.payments.flow_provider import FlowProvider
 from app.services.payments.lemonsqueezy_provider import LemonSqueezyProvider
+from app.services.payments.polar_provider import PolarProvider
 
 _providers: dict[str, PaymentProvider] = {}
 
@@ -22,6 +23,7 @@ def _get_providers() -> dict[str, PaymentProvider]:
         "paddle": PaddleProvider(),
         "flow": FlowProvider(),
         "lemonsqueezy": LemonSqueezyProvider(),
+        "polar": PolarProvider(),
     }
     return _providers
 

@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     lemonsqueezy_product_premium: str = ""
     lemonsqueezy_product_exam_week: str = ""
 
+    polar_access_token: str = ""
+    polar_webhook_secret: str = ""
+    polar_environment: str = "sandbox"
+    polar_product_premium: str = ""
+
     flow_api_key: str = ""
     flow_secret_key: str = ""
     flow_environment: str = "sandbox"

@@ -119,7 +119,7 @@ class PolarProvider(PaymentProvider):
             raise ValueError("Missing Polar.sh webhook secret")
 
         return validate_event(
-            payload=payload,
+            body=payload,
             headers=headers,
             secret=secret,
         )

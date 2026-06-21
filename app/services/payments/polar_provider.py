@@ -3,14 +3,13 @@ Polar.sh Payment Provider — Open-source Merchant of Record.
 https://docs.polar.sh/api
 """
 import base64
-import hashlib
-import hmac
 import json
 import logging
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 
 import httpx
+from polar_sdk.webhooks import validate_event
 from sqlalchemy.orm import Session as DbSession
 
 from app.core.config import get_settings
@@ -114,41 +113,16 @@ class PolarProvider(PaymentProvider):
         except (json.JSONDecodeError, TypeError):
             raise ValueError("Invalid webhook headers format")
 
-        msg_id = headers.get("webhook-id", "")
-        ts = headers.get("webhook-timestamp", "")
-        sig_h = headers.get("webhook-signature", "")
-
         s = get_settings()
         secret = getattr(s, "polar_webhook_secret", "") or ""
         if not secret:
             raise ValueError("Missing Polar.sh webhook secret")
 
-        key = base64.b64encode(secret.encode())
-        content = f"{msg_id}.{ts}.{payload.decode()}".encode()
-        expected = base64.b64encode(
-            hmac.new(key, content, hashlib.sha256).digest()
-        ).decode()
-
-        provided = ""
-        for part in sig_h.split(" "):
-            if part.startswith("v1,"):
-                provided = part[3:]
-
-        logger.info(
-            "Polar webhook diagnostic: id=%s ts=%s expected=%s provided=%s payload=%s",
-            msg_id, ts, expected[:40], provided[:40],
-            payload.decode()[:500],
+        return validate_event(
+            body=payload.decode(),
+            headers=headers,
+            secret=secret,
         )
-
-        if not msg_id or not ts or not provided:
-            raise ValueError(f"Missing webhook parameters: id={msg_id} ts={ts} sig={bool(provided)}")
-
-        if not hmac.compare_digest(expected, provided):
-            raise ValueError(
-                f"Signature mismatch: expected={expected[:30]}... provided={provided[:30]}..."
-            )
-
-        return json.loads(payload)
 
     async def process_webhook_event(
         self, event: dict, db: DbSession,

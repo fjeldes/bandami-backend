@@ -2,6 +2,7 @@
 Polar.sh Payment Provider — Open-source Merchant of Record.
 https://docs.polar.sh/api
 """
+import base64
 import hashlib
 import hmac
 import json
@@ -120,11 +121,13 @@ class PolarProvider(PaymentProvider):
         if not ts or not provided_sig or not secret:
             raise ValueError("Invalid webhook signature or missing secret")
 
-        expected_sig = hmac.new(
-            secret.encode(),
-            f"{ts}.{payload.decode()}".encode(),
-            hashlib.sha256,
-        ).hexdigest()
+        expected_sig = base64.b64encode(
+            hmac.new(
+                secret.encode(),
+                f"{ts}.{payload.decode()}".encode(),
+                hashlib.sha256,
+            ).digest()
+        ).decode()
 
         if not hmac.compare_digest(expected_sig, provided_sig):
             raise ValueError("Invalid Polar.sh webhook signature")

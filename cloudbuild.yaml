@@ -9,7 +9,7 @@ steps:
     args:
       - 'build'
       - '-t'
-      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$COMMIT_SHA'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:${_COMMIT_SHA}'
       - '-t'
       - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:latest'
       - '.'
@@ -19,7 +19,7 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
-      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$COMMIT_SHA'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:${_COMMIT_SHA}'
 
   # 3. Deploy to Cloud Run (dev)
   # Migrations run automatically on startup via start.sh → migrate.py
@@ -30,7 +30,7 @@ steps:
       - 'deploy'
       - '${_SERVICE}'
       - '--image'
-      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$COMMIT_SHA'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:${_COMMIT_SHA}'
       - '--region'
       - '${_REGION}'
       - '--platform'
@@ -49,7 +49,7 @@ steps:
       - 'ENVIRONMENT=development,DEBUG=true,FRONTEND_URL=${_FRONTEND_URL},BACKEND_URL=${_BACKEND_URL},CORS_ORIGINS=["${_FRONTEND_URL}"],PAYMENT_PROVIDER=lemonsqueezy,FLOW_ENVIRONMENT=sandbox,LEMONSQUEEZY_STORE_ID=409564,LEMONSQUEEZY_PRODUCT_PREMIUM=1150667,BREVO_FROM_EMAIL=${_BREVO_FROM_EMAIL}'
 
 images:
-  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$COMMIT_SHA'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:${_COMMIT_SHA}'
 
 substitutions:
   _REGION: us-central1
@@ -58,6 +58,7 @@ substitutions:
   _FRONTEND_URL: https://dev.bandami.com
   _BACKEND_URL: https://dev-api.bandami.com
   _BREVO_FROM_EMAIL: Bandami Dev <contacto@bandami.com>
+  _COMMIT_SHA: latest
 
 options:
   defaultLogsBucketBehavior: REGIONAL_USER_OWNED_BUCKET

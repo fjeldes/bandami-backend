@@ -9,7 +9,7 @@ steps:
     args:
       - 'build'
       - '-t'
-      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$COMMIT_SHA'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:${_COMMIT_SHA}'
       - '-t'
       - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:latest'
       - '.'
@@ -19,7 +19,7 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
-      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$COMMIT_SHA'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:${_COMMIT_SHA}'
 
   # 3. Deploy to Cloud Run (prod)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -29,7 +29,7 @@ steps:
       - 'deploy'
       - '${_SERVICE}'
       - '--image'
-      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$COMMIT_SHA'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:${_COMMIT_SHA}'
       - '--region'
       - '${_REGION}'
       - '--platform'
@@ -49,7 +49,7 @@ steps:
       - 'ENVIRONMENT=production,DEBUG=false,FRONTEND_URL=${_FRONTEND_URL},BACKEND_URL=${_BACKEND_URL},CORS_ORIGINS=["${_FRONTEND_URL}"],PAYMENT_PROVIDER=lemonsqueezy,PADDLE_ENVIRONMENT=production,LEMONSQUEEZY_STORE_ID=${_LEMONSQUEEZY_STORE_ID},LEMONSQUEEZY_PRODUCT_PREMIUM=${_LEMONSQUEEZY_PRODUCT_PREMIUM},BREVO_FROM_EMAIL=${_BREVO_FROM_EMAIL}'
 
 images:
-  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$COMMIT_SHA'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:${_COMMIT_SHA}'
 
 substitutions:
   _REGION: us-central1
@@ -60,6 +60,7 @@ substitutions:
   _LEMONSQUEEZY_STORE_ID: PENDING_LS_APPROVAL
   _LEMONSQUEEZY_PRODUCT_PREMIUM: PENDING_LS_APPROVAL
   _BREVO_FROM_EMAIL: Bandami <contacto@bandami.com>
+  _COMMIT_SHA: latest
 
 options:
   defaultLogsBucketBehavior: REGIONAL_USER_OWNED_BUCKET

@@ -203,6 +203,11 @@ async def verify_checkout_session(
             session_id, user_id, db, UserProfile, UserSubscription, SubscriptionPlan,
         )
 
+    if provider.provider_name == "polar":
+        return await provider.verify_transaction(
+            session_id, user_id, db, UserProfile, UserSubscription, SubscriptionPlan,
+        )
+
     if provider.provider_name != "stripe":
         return {"status": "skipped", "reason": "not supported for this provider"}
 

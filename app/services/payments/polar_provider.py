@@ -377,6 +377,23 @@ class PolarProvider(PaymentProvider):
         logger.info("Polar order created sub=%s order=%s amount=%s", sub_id, order_id, total_cents)
         return {"status": "ok"}
 
+    # -- verify_transaction ---------------------------------------------------
+
+    async def verify_transaction(
+        self, checkout_id: str, user_id: str, db: DbSession,
+        UserProfile, UserSubscription, SubscriptionPlan,
+    ) -> dict:
+        sub = db.query(UserSubscription).filter(
+            UserSubscription.user_id == user_id,
+            UserSubscription.status.in_(["active", "trialing"]),
+            UserSubscription.current_period_end > datetime.now(timezone.utc),
+        ).first()
+        if sub:
+            logger.info("Polar verify: subscription active user=%s", user_id)
+            return {"status": "ok", "subscription_id": sub.stripe_subscription_id}
+        logger.info("Polar verify: no subscription yet user=%s, waiting for webhook", user_id)
+        return {"status": "pending", "message": "Subscription is being provisioned. Please wait a moment."}
+
     # -- get_subscription -----------------------------------------------------
 
     async def get_subscription(self, user_id: str, db: DbSession, UserSubscription) -> SubscriptionInfo:

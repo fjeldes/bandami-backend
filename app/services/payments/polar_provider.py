@@ -9,7 +9,7 @@ from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 
 import httpx
-from polar_sdk import Polar
+from polar_sdk.webhooks import validate_event
 from sqlalchemy.orm import Session as DbSession
 
 from app.core.config import get_settings
@@ -113,19 +113,14 @@ class PolarProvider(PaymentProvider):
         except (json.JSONDecodeError, TypeError):
             raise ValueError("Invalid webhook headers format")
 
-        sig_header = headers.get("webhook-signature", "")
-        if not sig_header:
-            raise ValueError("Missing webhook-signature header")
-
         s = get_settings()
         secret = getattr(s, "polar_webhook_secret", "") or ""
         if not secret:
             raise ValueError("Missing Polar.sh webhook secret")
 
-        polar = Polar()
-        return polar.webhooks.validate(
+        return validate_event(
             payload=payload,
-            signature=sig_header,
+            headers=headers,
             secret=secret,
         )
 

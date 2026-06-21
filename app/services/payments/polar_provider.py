@@ -138,10 +138,8 @@ class PolarProvider(PaymentProvider):
 
         logger.info("Polar webhook type=%s id=%s", event_type, sub_id)
 
-        if event_type == "checkout.updated":
-            checkout_data = data.get("data", event)
-            status = checkout_data.get("status", "")
-            logger.info("Polar checkout updated id=%s status=%s", sub_id, status)
+        if event_type in ("checkout.created", "checkout.updated"):
+            logger.info("Polar checkout event id=%s", sub_id)
             return {"status": "ok"}
 
         if event_type == "subscription.created":
@@ -154,8 +152,7 @@ class PolarProvider(PaymentProvider):
             return self._handle_subscription_canceled(data, db, UserProfile, UserSubscription)
 
         if event_type == "order.created":
-            order_data = data.get("data", event)
-            return self._handle_order_created(order_data, db, UserProfile, UserSubscription)
+            return self._handle_order_created(data, db, UserProfile, UserSubscription)
 
         return {"status": "unhandled_event", "type": event_type}
 

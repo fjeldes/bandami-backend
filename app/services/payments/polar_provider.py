@@ -123,10 +123,9 @@ class PolarProvider(PaymentProvider):
             headers=headers,
             secret=secret,
         )
-        raw = event.model_dump_json()
-        d = json.loads(raw)
-        logger.info("Polar raw JSON keys: %s", list(d.keys()))
-        logger.info("Polar raw JSON type: %s", d.get("type", "MISSING"))
+        d = json.loads(event.model_dump_json())
+        if "TYPE" in d:
+            d["type"] = d.pop("TYPE")
         return d
 
     async def process_webhook_event(

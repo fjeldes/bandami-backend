@@ -2,6 +2,7 @@
 Payment router — delegates to the configured PaymentProvider (Stripe, Paddle, etc.).
 """
 
+import hashlib
 import json
 import logging
 from fastapi import APIRouter, HTTPException, Request, Depends, Query
@@ -77,6 +78,7 @@ async def payment_webhook(
 ):
     provider = _get_provider()
     payload = await request.body()
+    logger.info("Webhook raw body SHA256=%s len=%d", hashlib.sha256(payload).hexdigest(), len(payload))
 
     if provider.provider_name == "flow":
         signature = ""

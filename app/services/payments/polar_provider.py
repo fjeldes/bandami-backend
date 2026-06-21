@@ -122,7 +122,7 @@ class PolarProvider(PaymentProvider):
             body=payload,
             headers=headers,
             secret=secret,
-        )
+        ).model_dump()
 
     async def process_webhook_event(
         self, event: dict, db: DbSession,

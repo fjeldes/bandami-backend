@@ -3,14 +3,13 @@ Polar.sh Payment Provider — Open-source Merchant of Record.
 https://docs.polar.sh/api
 """
 import base64
-import hashlib
-import hmac
 import json
 import logging
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 
 import httpx
+from standardwebhooks.webhooks import Webhook
 from sqlalchemy.orm import Session as DbSession
 
 from app.core.config import get_settings
@@ -110,40 +109,22 @@ class PolarProvider(PaymentProvider):
 
     async def handle_webhook(self, payload: bytes, signature: str) -> dict:
         """
-        Polar.sh uses Standard Webhooks format.
-        Header format: t=<timestamp>,v1=<base64-signature>
-        Verify: HMAC-SHA256(secret, "{timestamp}.{body}")
+        Polar.sh uses Standard Webhooks.
+        Headers: webhook-id, webhook-timestamp, webhook-signature
+        The signature parameter is a JSON string with the webhook header dict.
         """
+        try:
+            headers = json.loads(signature)
+        except (json.JSONDecodeError, TypeError):
+            raise ValueError("Invalid webhook headers format")
+
         s = get_settings()
         secret = getattr(s, "polar_webhook_secret", "") or ""
+        if not secret:
+            raise ValueError("Missing Polar.sh webhook secret")
 
-        ts, provided_sig = self._parse_signature_header(signature)
-        if not ts or not provided_sig or not secret:
-            raise ValueError("Invalid webhook signature or missing secret")
-
-        expected_sig = base64.b64encode(
-            hmac.new(
-                base64.b64encode(secret.encode()),
-                f"{ts}.{payload.decode()}".encode(),
-                hashlib.sha256,
-            ).digest()
-        ).decode()
-
-        if not hmac.compare_digest(expected_sig, provided_sig):
-            raise ValueError("Invalid Polar.sh webhook signature")
-
-        return json.loads(payload)
-
-    @staticmethod
-    def _parse_signature_header(header: str) -> tuple[str | None, str | None]:
-        ts = sig = None
-        for part in header.split(","):
-            part = part.strip()
-            if part.startswith("t="):
-                ts = part[2:]
-            elif part.startswith("v1="):
-                sig = part[3:]
-        return ts, sig
+        wh = Webhook(base64.b64encode(secret.encode()).decode())
+        return wh.verify(payload, headers)
 
     async def process_webhook_event(
         self, event: dict, db: DbSession,

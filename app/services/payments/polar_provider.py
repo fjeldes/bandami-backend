@@ -3,13 +3,14 @@ Polar.sh Payment Provider — Open-source Merchant of Record.
 https://docs.polar.sh/api
 """
 import base64
+import hashlib
+import hmac
 import json
 import logging
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 
 import httpx
-from standardwebhooks.webhooks import Webhook
 from sqlalchemy.orm import Session as DbSession
 
 from app.core.config import get_settings
@@ -108,23 +109,40 @@ class PolarProvider(PaymentProvider):
     # -- webhook --------------------------------------------------------------
 
     async def handle_webhook(self, payload: bytes, signature: str) -> dict:
-        """
-        Polar.sh uses Standard Webhooks.
-        Headers: webhook-id, webhook-timestamp, webhook-signature
-        The signature parameter is a JSON string with the webhook header dict.
-        """
+        """Polar.sh uses Standard Webhooks. Verify HMAC-SHA256(|base64(secret)|, {id}.{ts}.{body})."""
         try:
             headers = json.loads(signature)
         except (json.JSONDecodeError, TypeError):
             raise ValueError("Invalid webhook headers format")
+
+        msg_id = headers.get("webhook-id", "")
+        ts = headers.get("webhook-timestamp", "")
+        sig_header = headers.get("webhook-signature", "")
+
+        sig = ""
+        for part in sig_header.split(" "):
+            if part.startswith("v1,"):
+                sig = part[3:]
+                break
+
+        if not msg_id or not ts or not sig:
+            raise ValueError("Missing webhook parameters")
 
         s = get_settings()
         secret = getattr(s, "polar_webhook_secret", "") or ""
         if not secret:
             raise ValueError("Missing Polar.sh webhook secret")
 
-        wh = Webhook(base64.b64encode(secret.encode()).decode())
-        return wh.verify(payload, headers)
+        key = base64.b64encode(secret.encode())
+        content = f"{msg_id}.{ts}.{payload.decode()}".encode()
+        expected = base64.b64encode(
+            hmac.new(key, content, hashlib.sha256).digest()
+        ).decode()
+
+        if not hmac.compare_digest(expected, sig):
+            raise ValueError("Invalid Polar.sh webhook signature")
+
+        return json.loads(payload)
 
     async def process_webhook_event(
         self, event: dict, db: DbSession,

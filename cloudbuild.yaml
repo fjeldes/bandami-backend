@@ -36,7 +36,7 @@ steps:
         BACKEND_URL: ${_BACKEND_URL}
         PAYMENT_PROVIDER: polar
         POLAR_ENVIRONMENT: sandbox
-        POLAR_PRODUCT_PREMIUM: "35bfb21d-7c1f-4086-b647-4511cdaf57a5"
+        POLAR_PRODUCT_PREMIUM: "5251f578-4212-416c-9b36-4030bc0fd45a"
         FLOW_ENVIRONMENT: sandbox
         BREVO_FROM_EMAIL: '${_BREVO_FROM_EMAIL}'
         EOF

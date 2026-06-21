@@ -98,7 +98,7 @@ async def payment_webhook(
         event_type = event.get("event_type") or event.get("meta", {}).get("event_name", "unknown")
         logger.info("Webhook received provider=%s event_type=%s", provider.provider_name, event_type)
     except Exception:
-        logger.warning("Webhook signature verification failed provider=%s", provider.provider_name)
+        logger.exception("Webhook signature verification failed provider=%s", provider.provider_name)
         raise HTTPException(status_code=400, detail="Invalid webhook signature")
 
     result = await provider.process_webhook_event(

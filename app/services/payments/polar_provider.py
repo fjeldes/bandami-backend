@@ -118,11 +118,13 @@ class PolarProvider(PaymentProvider):
         if not secret:
             raise ValueError("Missing Polar.sh webhook secret")
 
-        return validate_event(
+        event = validate_event(
             body=payload,
             headers=headers,
             secret=secret,
         ).model_dump()
+        logger.info("Polar validated event: %s", {k: str(v)[:80] for k, v in event.items()})
+        return event
 
     async def process_webhook_event(
         self, event: dict, db: DbSession,

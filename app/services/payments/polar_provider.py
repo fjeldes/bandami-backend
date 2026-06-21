@@ -122,9 +122,8 @@ class PolarProvider(PaymentProvider):
             body=payload,
             headers=headers,
             secret=secret,
-        ).model_dump()
-        logger.info("Polar validated event: %s", {k: str(v)[:80] for k, v in event.items()})
-        return event
+        )
+        return json.loads(event.model_dump_json())
 
     async def process_webhook_event(
         self, event: dict, db: DbSession,

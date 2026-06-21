@@ -142,7 +142,7 @@ class PolarProvider(PaymentProvider):
             if part.startswith("t="):
                 ts = part[2:]
             elif part.startswith("v1="):
-                sig = part[2:]
+                sig = part[3:]
         return ts, sig
 
     async def process_webhook_event(

@@ -83,8 +83,7 @@ async def payment_webhook(
     elif provider.provider_name == "lemonsqueezy":
         signature = request.headers.get("x-signature", "")
     elif provider.provider_name == "polar":
-        wh_headers = dict(request.headers)
-        signature = json.dumps(wh_headers)
+        signature = json.dumps(dict(request.headers))
     else:
         signature = request.headers.get(
             "stripe-signature" if provider.provider_name == "stripe" else "paddle-signature", ""

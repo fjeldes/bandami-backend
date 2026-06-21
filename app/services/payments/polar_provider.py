@@ -122,7 +122,7 @@ class PolarProvider(PaymentProvider):
         if not secret:
             raise ValueError("Missing Polar.sh webhook secret")
 
-        polar = Polar(access_token="")
+        polar = Polar()
         return polar.webhooks.validate(
             payload=payload,
             signature=sig_header,

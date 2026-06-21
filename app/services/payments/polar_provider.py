@@ -123,7 +123,7 @@ class PolarProvider(PaymentProvider):
 
         expected_sig = base64.b64encode(
             hmac.new(
-                secret.encode(),
+                base64.b64encode(secret.encode()),
                 f"{ts}.{payload.decode()}".encode(),
                 hashlib.sha256,
             ).digest()

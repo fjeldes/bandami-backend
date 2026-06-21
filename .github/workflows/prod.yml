@@ -65,4 +65,4 @@ jobs:
           gcloud builds submit \
             --project=bandami-prod \
             --config=cloudbuild.prod.yaml \
-            --substitutions=_REGION=us-central1,_SERVICE=ielts-backend,_REPOSITORY=prod-backend,_FRONTEND_URL=https://bandami.com,_BACKEND_URL=https://api.bandami.com,_BREVO_FROM_EMAIL="Bandami <contacto@bandami.com>",_LEMONSQUEEZY_STORE_ID=PENDING_LS_APPROVAL,_LEMONSQUEEZY_PRODUCT_PREMIUM=PENDING_LS_APPROVAL
+            --substitutions=_COMMIT_SHA=${{ github.sha }},_REGION=us-central1,_SERVICE=ielts-backend,_REPOSITORY=prod-backend,_FRONTEND_URL=https://bandami.com,_BACKEND_URL=https://api.bandami.com,_BREVO_FROM_EMAIL="Bandami <contacto@bandami.com>",_LEMONSQUEEZY_STORE_ID=PENDING_LS_APPROVAL,_LEMONSQUEEZY_PRODUCT_PREMIUM=PENDING_LS_APPROVAL

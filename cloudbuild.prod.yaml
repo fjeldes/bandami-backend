@@ -23,30 +23,34 @@ steps:
 
   # 3. Deploy to Cloud Run (prod)
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    entrypoint: gcloud
+    entrypoint: bash
     args:
-      - 'run'
-      - 'deploy'
-      - '${_SERVICE}'
-      - '--image'
-      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:${_COMMIT_SHA}'
-      - '--region'
-      - '${_REGION}'
-      - '--platform'
-      - 'managed'
-      - '--allow-unauthenticated'
-      - '--cpu'
-      - '1'
-      - '--memory'
-      - '512Mi'
-      - '--timeout'
-      - '300'
-      - '--min-instances'
-      - '1'
-      - '--set-secrets'
-      - 'DATABASE_URL=PROD_DATABASE_URL:latest,OPENAI_API_KEY=PROD_OPENAI_API_KEY:latest,GEMINI_API_KEY=PROD_GEMINI_API_KEY:latest,JWT_SECRET_KEY=PROD_JWT_SECRET_KEY:latest,BREVO_API_KEY=PROD_BREVO_API_KEY:latest,PADDLE_API_KEY=PROD_PADDLE_API_KEY:latest,PADDLE_WEBHOOK_SECRET=PROD_PADDLE_WEBHOOK_SECRET:latest,LEMONSQUEEZY_WEBHOOK_SECRET=PROD_LEMONSQUEEZY_WEBHOOK_SECRET:latest,GOOGLE_CLIENT_ID=PROD_GOOGLE_CLIENT_ID:latest,GOOGLE_CLIENT_SECRET=PROD_GOOGLE_CLIENT_SECRET:latest'
-      - '--set-env-vars'
-      - 'ENVIRONMENT=production,DEBUG=false,FRONTEND_URL=${_FRONTEND_URL},BACKEND_URL=${_BACKEND_URL},CORS_ORIGINS=["https://bandami.com","https://www.bandami.com"],PAYMENT_PROVIDER=lemonsqueezy,PADDLE_ENVIRONMENT=production,LEMONSQUEEZY_STORE_ID=${_LEMONSQUEEZY_STORE_ID},LEMONSQUEEZY_PRODUCT_PREMIUM=${_LEMONSQUEEZY_PRODUCT_PREMIUM},BREVO_FROM_EMAIL=${_BREVO_FROM_EMAIL}'
+      - '-c'
+      - |
+        cat > /tmp/env.yaml << 'EOF'
+        CORS_ORIGINS: '["https://bandami.com","https://www.bandami.com"]'
+        ENVIRONMENT: production
+        DEBUG: "false"
+        FRONTEND_URL: ${_FRONTEND_URL}
+        BACKEND_URL: ${_BACKEND_URL}
+        PAYMENT_PROVIDER: lemonsqueezy
+        PADDLE_ENVIRONMENT: production
+        LEMONSQUEEZY_STORE_ID: "${_LEMONSQUEEZY_STORE_ID}"
+        LEMONSQUEEZY_PRODUCT_PREMIUM: "${_LEMONSQUEEZY_PRODUCT_PREMIUM}"
+        BREVO_FROM_EMAIL: '${_BREVO_FROM_EMAIL}'
+        EOF
+
+        gcloud run deploy ${_SERVICE} \
+          --image ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:${_COMMIT_SHA} \
+          --region ${_REGION} \
+          --platform managed \
+          --allow-unauthenticated \
+          --cpu 1 \
+          --memory 512Mi \
+          --timeout 300 \
+          --min-instances 1 \
+          --set-secrets DATABASE_URL=PROD_DATABASE_URL:latest,OPENAI_API_KEY=PROD_OPENAI_API_KEY:latest,GEMINI_API_KEY=PROD_GEMINI_API_KEY:latest,JWT_SECRET_KEY=PROD_JWT_SECRET_KEY:latest,BREVO_API_KEY=PROD_BREVO_API_KEY:latest,PADDLE_API_KEY=PROD_PADDLE_API_KEY:latest,PADDLE_WEBHOOK_SECRET=PROD_PADDLE_WEBHOOK_SECRET:latest,LEMONSQUEEZY_WEBHOOK_SECRET=PROD_LEMONSQUEEZY_WEBHOOK_SECRET:latest,GOOGLE_CLIENT_ID=PROD_GOOGLE_CLIENT_ID:latest,GOOGLE_CLIENT_SECRET=PROD_GOOGLE_CLIENT_SECRET:latest \
+          --env-vars-file /tmp/env.yaml
 
 images:
   - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:${_COMMIT_SHA}'

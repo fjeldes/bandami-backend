@@ -27,6 +27,7 @@ def _is_provider_error(e: Exception) -> bool:
     return any(kw in msg for kw in [
         "timeout", "unavailable", "connection", "503", "500",
         "retry", "deadline", "429", "service", "reset",
+        "overloaded", "capacity", "exhausted",
     ])
 
 

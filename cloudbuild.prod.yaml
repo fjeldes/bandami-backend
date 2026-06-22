@@ -60,8 +60,6 @@ substitutions:
   _REPOSITORY: prod-backend
   _FRONTEND_URL: https://bandami.com
   _BACKEND_URL: https://api.bandami.com
-  _LEMONSQUEEZY_STORE_ID: PENDING_LS_APPROVAL
-  _LEMONSQUEEZY_PRODUCT_PREMIUM: PENDING_LS_APPROVAL
   _BREVO_FROM_EMAIL: Bandami <contacto@bandami.com>
   _COMMIT_SHA: latest
 

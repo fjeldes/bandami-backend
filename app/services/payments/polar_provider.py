@@ -509,19 +509,25 @@ class PolarProvider(PaymentProvider):
             UserSubscription.stripe_subscription_id.isnot(None),
         ).order_by(UserSubscription.current_period_end.desc()).first()
 
-        if sub and sub.stripe_subscription_id:
-            try:
-                data = await self._get("/customer-portal/subscriptions/")
-                items = data.get("items", [])
-                for item in items:
-                    if item.get("id") == sub.stripe_subscription_id:
-                        portal_url = item.get("customer_portal_url")
-                        if portal_url:
-                            return {"url": portal_url}
-            except Exception:
-                logger.exception("Failed to get Polar customer portal sub=%s", sub.stripe_subscription_id)
+        if not sub or not sub.stripe_subscription_id:
+            raise ValueError("No active subscription found")
 
-        raise ValueError("Could not open billing portal. Please contact support.")
+        try:
+            sub_data = await self._get(f"/subscriptions/{sub.stripe_subscription_id}")
+            customer_id = sub_data.get("customer_id", "")
+            if not customer_id:
+                raise ValueError("Could not find customer ID")
+
+            session = await self._post("/customer-sessions/", {
+                "customer_id": customer_id,
+            })
+            portal_url = session.get("customer_portal_url", "")
+            if portal_url:
+                return {"url": portal_url}
+        except Exception:
+            logger.exception("Failed to create Polar customer portal session sub=%s", sub.stripe_subscription_id)
+
+        raise ValueError("Could not open billing portal. Please try again later.")
 
     # -- get_invoices ---------------------------------------------------------
 

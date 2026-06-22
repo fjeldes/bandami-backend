@@ -520,6 +520,7 @@ class PolarProvider(PaymentProvider):
 
             session = await self._post("/customer-sessions/", {
                 "customer_id": customer_id,
+                "return_url": f"{get_settings().frontend_url}/settings",
             })
             portal_url = session.get("customer_portal_url", "")
             if portal_url:

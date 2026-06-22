@@ -10,12 +10,14 @@ from app.db.deps import get_db
 from app.core.auth import get_current_user, get_user_plan_info
 from app.core.config import get_settings
 from app.core.security import hash_password, verify_password
+from app.core.limiter import limiter
 from app.models.user import UserProfile, RefreshToken
 from app.models.exam import Exam, Evaluation
-from app.models.subscription import UserCreditPack, SubscriptionPlan, UserSubscription
+from app.models.subscription import UserCreditPack, SubscriptionPlan, UserSubscription, UserPayment
 from app.models.study_plan import StudyPlan
 from app.models.review import ReviewRequest
 from app.models.consent import UserConsent
+from app.services.email_service import send_admin_appeal_notification, send_account_deletion_confirmation
 from app.schemas.evaluation import (
     DashboardStats, UserCreditPackResponse,
     SubscriptionPlanResponse, UserSubscriptionResponse,
@@ -609,6 +611,7 @@ class AppealRequest(BaseModel):
 
 
 @router.delete("/me")
+@limiter.limit("3/minute")
 async def delete_account(
     user_id: str = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -635,6 +638,9 @@ async def delete_account(
     db.query(RefreshToken).filter(RefreshToken.user_id == user_id).delete(synchronize_session=False)
     db.query(UserConsent).filter(UserConsent.user_id == user_id).delete(synchronize_session=False)
 
+    original_email = user.email
+    original_name = user.full_name or "there"
+
     user.email = f"deleted-{user.id}@anonymous.bandami.com"
     user.full_name = None
     user.hashed_password = None
@@ -643,11 +649,16 @@ async def delete_account(
     user.referred_by = None
     user.subscription_tier = "deleted"
 
+    email = user.email
+    name = user.full_name or "there"
     db.commit()
+
+    send_account_deletion_confirmation(to_email=original_email, name=original_name)
     return {"status": "deleted"}
 
 
 @router.post("/me/evaluations/{exam_id}/appeal")
+@limiter.limit("5/minute")
 async def appeal_evaluation(
     exam_id: str,
     body: AppealRequest,
@@ -673,6 +684,17 @@ async def appeal_evaluation(
     )
     db.add(review)
     db.commit()
+
+    user = db.query(UserProfile).filter(UserProfile.id == user_id).first()
+    exam = db.query(Exam).filter(Exam.id == exam_id).first()
+    if user and exam and evaluation.overall_band:
+        send_admin_appeal_notification(
+            user_email=user.email,
+            exam_type=exam.exam_type or "unknown",
+            band=evaluation.overall_band,
+            reason=body.reason,
+        )
+
     return {"status": "pending", "review_id": str(review.id)}
 
 
@@ -720,3 +742,80 @@ async def record_consent(
     db.add(consent)
     db.commit()
     return {"status": "recorded"}
+
+
+# ---- GDPR Art.20 — Data Portability ----
+
+@router.get("/me/export")
+@limiter.limit("2/minute")
+async def export_user_data(
+    user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Export all user data in a machine-readable JSON format."""
+    user = db.query(UserProfile).filter(UserProfile.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    exams = db.query(Exam).filter(Exam.user_id == user_id).order_by(Exam.created_at.desc()).all()
+    evaluations = db.query(Evaluation).filter(
+        Evaluation.exam_id.in_([e.id for e in exams])
+    ).order_by(Evaluation.created_at.desc()).all() if exams else []
+
+    payments = db.query(UserPayment).filter(
+        UserPayment.user_id == user_id,
+    ).order_by(UserPayment.created_at.desc()).all()
+
+    study_plans = db.query(StudyPlan).filter(StudyPlan.user_id == user_id).all()
+    subscriptions = db.query(UserSubscription).filter(
+        UserSubscription.user_id == user_id,
+    ).order_by(UserSubscription.current_period_end.desc()).all()
+    reviews = db.query(ReviewRequest).filter(ReviewRequest.user_id == user_id).all()
+    consents = db.query(UserConsent).filter(UserConsent.user_id == user_id).all()
+
+    return {
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "profile": {
+            "id": str(user.id),
+            "email": user.email,
+            "full_name": user.full_name,
+            "subscription_tier": user.subscription_tier,
+            "role": user.role,
+            "created_at": user.created_at.isoformat() if user.created_at else None,
+            "upgraded_at": user.upgraded_at.isoformat() if user.upgraded_at else None,
+        },
+        "exams": [{
+            "id": str(e.id),
+            "type": e.exam_type,
+            "task_type": e.task_type,
+            "status": e.status,
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+        } for e in exams],
+        "evaluations": [{
+            "id": str(ev.id),
+            "exam_id": str(ev.exam_id),
+            "overall_band": ev.overall_band,
+            "criteria_scores": ev.criteria_scores,
+            "created_at": ev.created_at.isoformat() if ev.created_at else None,
+        } for ev in evaluations],
+        "payments": [{
+            "id": str(p.id),
+            "amount": p.amount_clp,
+            "currency": p.currency,
+            "type": p.payment_type,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+        } for p in payments],
+        "subscriptions": [{
+            "id": str(s.id),
+            "plan_id": str(s.plan_id) if s.plan_id else None,
+            "status": s.status,
+            "current_period_end": s.current_period_end.isoformat() if s.current_period_end else None,
+        } for s in subscriptions],
+        "study_plans": len(study_plans),
+        "reviews": len(reviews),
+        "consents": [{
+            "type": c.consent_type,
+            "granted": c.granted,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+        } for c in consents],
+    }

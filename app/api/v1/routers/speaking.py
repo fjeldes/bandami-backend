@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 import os
 from sqlalchemy.orm import Session
 
@@ -13,6 +13,10 @@ from app.core.auth import (
     get_ai_provider,
     compute_feedback_unlocks_at,
 )
+from app.services.storage import upload_audio_bytes, get_audio_url
+
+import logging
+logger = logging.getLogger(__name__)
 from app.core.limiter import limiter
 from app.services.providers.base import SpeakingEvaluator, SPEAKING_CRITERIA_KEYS, ProviderUnavailableError
 from datetime import datetime, timezone
@@ -128,12 +132,12 @@ async def evaluate_speaking_endpoint(
         transcription = await provider.transcribe_audio(audio_bytes, audio.filename or "audio.webm")
         result = await provider.evaluate_speaking(transcription, detailed=not is_free)
 
-        # Save audio for playback
-        audio_dir = "/app/static/audio"
-        os.makedirs(audio_dir, exist_ok=True)
-        audio_filename = f"{exam_id}.webm"
-        with open(os.path.join(audio_dir, audio_filename), "wb") as f:
-            f.write(audio_bytes)
+        # Store audio in GCS for persistence
+        try:
+            from app.services.storage import upload_audio_bytes
+            upload_audio_bytes(exam_id, audio_bytes, audio.content_type or "audio/webm")
+        except Exception:
+            logger.warning("Failed to upload audio to GCS for exam=%s", exam_id)
 
         ev = Evaluation(
             exam_id=exam.id,
@@ -255,8 +259,8 @@ async def get_speaking_audio(
     if not exam:
         raise HTTPException(status_code=404, detail="Exam not found")
 
-    audio_path = f"/app/static/audio/{exam_id}.webm"
-    if not os.path.exists(audio_path):
+    try:
+        url = get_audio_url(exam_id)
+        return RedirectResponse(url=url, status_code=302)
+    except Exception:
         raise HTTPException(status_code=404, detail="Audio not found")
-
-    return FileResponse(audio_path, media_type="audio/webm")

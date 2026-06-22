@@ -116,6 +116,14 @@ async def check_daily_limit(
         return user_plan
 
     user_plan["eval_source"] = "free"
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    daily_limit = user_plan.get("daily_eval_limit", 4)
+    used_today = db.scalar(
+        text("SELECT COUNT(*) FROM exams WHERE user_id = :uid AND created_at >= :day_start AND eval_source = 'free' AND status NOT IN ('pending', 'failed')"),
+        {"uid": user_id, "day_start": day_start},
+    ) or 0
+    if used_today >= daily_limit:
+        user_plan["eval_source"] = "free_limit_reached"
     return user_plan
 
 
@@ -123,6 +131,12 @@ async def get_ai_provider(
     user_plan: dict = Depends(check_daily_limit),
 ) -> object:
     """Return AI provider instance. Returns objects implementing SpeakingEvaluator, WritingEvaluator, etc."""
+    if user_plan.get("eval_source") == "free_limit_reached":
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=429,
+            detail=f"You've reached your daily limit of {user_plan.get('daily_eval_limit', 4)} evaluations. Upgrade to Pro for unlimited access."
+        )
     provider_name = user_plan["provider"]
     return get_provider(provider_name)
 

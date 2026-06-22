@@ -132,6 +132,7 @@ def _user_response(user: UserProfile, db: Session = None) -> dict:
         "role": user.role or "user",
         "referral_code": user.referral_code or "",
         "referral_discounts": discounts,
+        "google_id": user.google_id,
     }
 
 

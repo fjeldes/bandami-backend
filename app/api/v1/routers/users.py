@@ -548,7 +548,7 @@ async def change_password(
 ):
     user = db.query(UserProfile).filter(UserProfile.id == user_id).first()
     if not user or not user.hashed_password:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=400, detail="Password not available for Google-authenticated accounts")
     if not verify_password(body.current_password, user.hashed_password):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
     user.hashed_password = hash_password(body.new_password)

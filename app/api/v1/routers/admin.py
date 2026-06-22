@@ -16,8 +16,8 @@ from app.db.deps import get_db
 from app.core.auth import require_admin
 from app.models.user import UserProfile
 from app.models.exam import Exam, Evaluation, Question
-from app.models.subscription import SubscriptionPlan, UserSubscription, UserCreditPack
-
+from app.models.subscription import SubscriptionPlan, UserSubscription, UserCreditPack, UserPayment
+from app.models.review import ReviewRequest
 router = APIRouter(dependencies=[Depends(require_admin)])
 
 
@@ -429,3 +429,54 @@ async def admin_analytics(db: Session = Depends(get_db)):
         "dau": dau_data,
         "evaluations_per_day": evals_data,
     }
+
+
+# ---- Review Management (GDPR Art.22 human intervention) ----
+
+class ResolveReviewRequest(BaseModel):
+    resolved_band: float
+    reviewer_notes: str = ""
+
+
+@router.get("/reviews")
+async def list_reviews(
+    status: str = "pending",
+    _: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    reviews = db.query(ReviewRequest).filter(
+        ReviewRequest.status == status,
+    ).order_by(ReviewRequest.created_at.asc()).limit(50).all()
+    return [{
+        "id": str(r.id),
+        "evaluation_id": str(r.evaluation_id),
+        "user_id": r.user_id,
+        "status": r.status,
+        "reason": r.reason,
+        "resolved_band": r.resolved_band,
+        "reviewer_notes": r.reviewer_notes,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+        "resolved_at": r.resolved_at.isoformat() if r.resolved_at else None,
+    } for r in reviews]
+
+
+@router.post("/reviews/{review_id}/resolve")
+async def resolve_review(
+    review_id: str,
+    body: ResolveReviewRequest,
+    admin_user: str = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    review = db.query(ReviewRequest).filter(ReviewRequest.id == review_id).first()
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+    if review.status != "pending":
+        raise HTTPException(status_code=400, detail="Review already resolved")
+
+    review.status = "resolved"
+    review.reviewer_id = admin_user
+    review.reviewer_notes = body.reviewer_notes
+    review.resolved_band = body.resolved_band
+    review.resolved_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"status": "resolved"}

@@ -6,6 +6,7 @@
 import json
 import time
 import asyncio
+from app.services.privacy import sanitize_for_ai
 import logging
 from openai import AsyncOpenAI
 from app.core.config import get_settings
@@ -43,6 +44,7 @@ class OpenAIProvider(BaseSpeakingEvaluator, WritingEvaluator, ReadingEvaluator, 
 
     async def evaluate_writing(self, text: str, task_type: str, detailed: bool = True) -> AIEvaluationResult:
         start = time.time()
+        text = sanitize_for_ai(text)
         is_premium = detailed
         task_label = "Task 1 (Report/Letter)" if task_type == "task1" else "Task 2 (Essay)"
         prompt = WRITING_PREMIUM if is_premium else WRITING_OPENAI

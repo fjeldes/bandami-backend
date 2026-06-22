@@ -214,7 +214,7 @@ class PolarProvider(PaymentProvider):
         db.query(UserProfile).filter(UserProfile.id == str(user.id)).update(update)
         db.flush()
 
-        if total_cents > 0:
+        if total_cents > 0 and status != "trialing":
             from app.models.subscription import UserPayment
             db.add(UserPayment(
                 user_id=str(user.id), subscription_id=new_sub.id,

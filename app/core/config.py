@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     polar_environment: str = "sandbox"
     polar_product_premium: str = ""
 
+    groq_api_key: str = ""
+
     flow_api_key: str = ""
     flow_secret_key: str = ""
     flow_environment: str = "sandbox"

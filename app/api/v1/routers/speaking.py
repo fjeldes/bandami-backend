@@ -27,14 +27,10 @@ router = APIRouter()
 
 
 def _filter_speaking_criteria(criteria: dict, is_visible: bool) -> dict:
-    """Free tier: return main 4 criteria scores only (no comment). Premium: all criteria + comments."""
+    """Free tier: return main 4 criteria with scores and comments. Premium: all criteria."""
     if is_visible:
         return criteria
-    return {
-        k: {"score": v["score"]}
-        for k, v in criteria.items()
-        if k in SPEAKING_CRITERIA_KEYS and isinstance(v, dict) and "score" in v
-    }
+    return {k: v for k, v in criteria.items() if k in SPEAKING_CRITERIA_KEYS}
 
 
 @router.post("/exam", response_model=ExamResponse)
@@ -130,7 +126,17 @@ async def evaluate_speaking_endpoint(
             raise HTTPException(status_code=415, detail=f"Unsupported audio format: {audio.content_type}. Use WebM, MP3, MP4, WAV, or OGG.")
         
         transcription = await provider.transcribe_audio(audio_bytes, audio.filename or "audio.webm")
-        result = await provider.evaluate_speaking(transcription, detailed=not is_free)
+        try:
+            result = await provider.evaluate_speaking(transcription, detailed=not is_free)
+        except ProviderUnavailableError:
+            fb_name = plan_info.get("fallback_provider")
+            if fb_name:
+                logger.info("Primary provider failed, trying fallback=%s", fb_name)
+                from app.services.providers import get_provider
+                fb = get_provider(fb_name)
+                result = await fb.evaluate_speaking(transcription, detailed=not is_free)
+            else:
+                raise
 
         # Store audio in GCS for persistence
         try:

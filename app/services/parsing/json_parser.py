@@ -13,14 +13,29 @@ class JsonParser:
     @classmethod
     def parse(cls, raw: str) -> dict:
         cleaned = cls._strip_markdown(raw)
+        result = {}
+
         try:
-            return json.loads(cleaned)
+            result = json.loads(cleaned)
         except json.JSONDecodeError:
             pass
-        try:
-            return cls._extract_partial_json(cleaned)
-        except ValueError:
-            raise ValueError(f"AI returned invalid JSON: {raw[:200]}")
+
+        if not result.get("criteria_scores"):
+            try:
+                extracted = cls._extract_partial_json(cleaned)
+                for key in ("criteria_scores", "general_feedback", "detailed_feedback", "grammar_corrections"):
+                    if not result.get(key) and extracted.get(key):
+                        result[key] = extracted[key]
+            except ValueError:
+                pass
+
+        if not result.get("overall_band"):
+            try:
+                extracted = cls._extract_partial_json(cleaned)
+                result["overall_band"] = extracted["overall_band"]
+            except (ValueError, KeyError):
+                raise ValueError(f"AI returned invalid JSON: {raw[:200]}")
+        return result
 
     @staticmethod
     def _strip_markdown(text: str) -> str:

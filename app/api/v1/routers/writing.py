@@ -27,6 +27,7 @@ def _is_provider_error(e: Exception) -> bool:
     return any(kw in msg for kw in [
         "timeout", "unavailable", "connection", "503", "500",
         "retry", "deadline", "429", "service", "reset",
+        "overloaded", "capacity", "exhausted",
     ])
 
 
@@ -101,9 +102,19 @@ async def evaluate_writing_endpoint(
         task_type = exam.task_type or submission.task_type or "task2"
         try:
             result = await provider.evaluate_writing(submission.text, task_type, detailed=not is_free)
+        except ProviderUnavailableError:
+            fb_name = plan_info.get("fallback_provider")
+            if fb_name:
+                logger.info("Primary provider failed, trying fallback=%s", fb_name)
+                from app.services.providers import get_provider
+                fb = get_provider(fb_name)
+                result = await fb.evaluate_writing(submission.text, task_type, detailed=not is_free)
+            else:
+                raise
         except Exception as e:
             if _is_provider_error(e):
                 raise ProviderUnavailableError(str(e)) from e
+            raise
             raise
 
         ev = Evaluation(

@@ -1,12 +1,12 @@
 """
-Google Cloud Storage service for presigned URLs — secure audio file access.
-Files are private; only accessible via short-lived presigned URLs.
+Google Cloud Storage service for audio file persistence.
+Files are private; access via presigned URLs or direct IAM.
 """
 import os
 from datetime import timedelta
 from google.cloud import storage
 
-BUCKET_NAME = os.environ.get("GCS_AUDIO_BUCKET", "bandami-audio-private")
+BUCKET_NAME = os.environ.get("GCS_AUDIO_BUCKET", "bandami-dev-audio")
 
 
 def _get_bucket():
@@ -14,19 +14,18 @@ def _get_bucket():
     return client.bucket(BUCKET_NAME)
 
 
-def generate_upload_url(exam_id: str, content_type: str = "audio/webm") -> str:
-    """Generate a 5-minute presigned PUT URL for direct audio upload."""
+def upload_audio_bytes(exam_id: str, audio_bytes: bytes, content_type: str = "audio/webm") -> str:
+    """Upload audio bytes to GCS. Returns the blob path."""
     blob = _get_bucket().blob(f"audio/{exam_id}.webm")
-    return blob.generate_signed_url(
-        expiration=timedelta(minutes=5),
-        method="PUT",
-        content_type=content_type,
-    )
+    blob.upload_from_string(audio_bytes, content_type=content_type)
+    return blob.name
 
 
-def generate_download_url(exam_id: str) -> str:
+def get_audio_url(exam_id: str) -> str:
     """Generate a 10-minute presigned GET URL for audio playback."""
     blob = _get_bucket().blob(f"audio/{exam_id}.webm")
+    if not blob.exists():
+        raise FileNotFoundError(f"Audio not found: {exam_id}")
     return blob.generate_signed_url(
         expiration=timedelta(minutes=10),
         method="GET",

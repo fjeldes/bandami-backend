@@ -384,3 +384,49 @@ def send_payment_failed_email(to_email: str, name: str) -> None:
         _build_body(None, content, settings_url, "Update Payment Method"),
     )
 
+
+def send_admin_appeal_notification(user_email: str, exam_type: str, band: float, reason: str) -> None:
+    """Notify admins when a user appeals an AI-generated band score (GDPR Art.22)."""
+    admin_email = getattr(settings, "brevo_from_email", "contacto@bandami.com")
+    admin_email = re.sub(r".*<(.+)>", r"\1", admin_email)
+
+    content = f"""
+    <tr>
+      <td style="padding: 0 32px; font-size: 15px; color: #475569; line-height: 1.7;">
+        <p>A user has requested a human review of an AI-generated band score.</p>
+        <p><strong>User:</strong> {user_email}<br>
+        <strong>Exam type:</strong> {exam_type}<br>
+        <strong>Current AI band:</strong> {band}<br>
+        <strong>Reason:</strong> {reason or 'No reason provided'}</p>
+        <p>Review this appeal in the admin panel.</p>
+      </td>
+    </tr>
+    """
+
+    _send_email(
+        admin_email,
+        "AI Score Appeal — Review Required",
+        _build_body(None, content, None, "Open Admin Panel"),
+    )
+
+
+def send_account_deletion_confirmation(to_email: str, name: str) -> None:
+    """Confirm to user that their account has been deleted (GDPR Art.17)."""
+    content = f"""
+    <tr>
+      <td style="padding: 0 32px; font-size: 15px; color: #475569; line-height: 1.7;">
+        <p>Hello {name},</p>
+        <p>Your Bandami account and all associated data have been permanently deleted as requested.</p>
+        <p><strong>What was deleted:</strong> Your profile information, essays, audio recordings, study plans, and evaluation history.</p>
+        <p><strong>What was retained:</strong> Payment receipts as required by tax law (pseudo-anonymized).</p>
+        <p>If you change your mind, you can create a new account at any time.</p>
+      </td>
+    </tr>
+    """
+
+    _send_email(
+        to_email,
+        "Your Bandami account has been deleted",
+        _build_body(None, content, None, None),
+    )
+

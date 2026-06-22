@@ -1,17 +1,23 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 from sqlalchemy import select, desc, text
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone, timedelta
+import glob
+import os
 
 from app.db.deps import get_db
 from app.core.auth import get_current_user, get_user_plan_info
 from app.core.config import get_settings
 from app.core.security import hash_password, verify_password
-from app.models.user import UserProfile
+from app.core.limiter import limiter
+from app.models.user import UserProfile, RefreshToken
 from app.models.exam import Exam, Evaluation
-from app.models.subscription import UserCreditPack, SubscriptionPlan, UserSubscription
+from app.models.subscription import UserCreditPack, SubscriptionPlan, UserSubscription, UserPayment
 from app.models.study_plan import StudyPlan
+from app.models.review import ReviewRequest
+from app.models.consent import UserConsent
+from app.services.email_service import send_admin_appeal_notification, send_account_deletion_confirmation
 from app.schemas.evaluation import (
     DashboardStats, UserCreditPackResponse,
     SubscriptionPlanResponse, UserSubscriptionResponse,
@@ -596,3 +602,220 @@ async def apply_referral(
     referrer.referral_discounts = (referrer.referral_discounts or 0) + 1
     db.commit()
     return {"status": "ok", "message": "Referral applied! 50% off on your next Week Pass."}
+
+
+# ---- Privacy & Data Rights (GDPR / Chilean Law 19.628) ----
+
+class AppealRequest(BaseModel):
+    reason: str = ""
+
+
+@router.delete("/me")
+@limiter.limit("3/minute")
+async def delete_account(
+    user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """GDPR Art.17 Right to Erasure. Hard-deletes content, pseudo-anonymizes profile for financial integrity."""
+    user = db.query(UserProfile).filter(UserProfile.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    audio_dir = "/app/static/audio"
+    if os.path.exists(audio_dir):
+        for f in glob.glob(os.path.join(audio_dir, f"*{user_id}*")):
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+
+    exam_ids = [e[0] for e in db.query(Exam.id).filter(Exam.user_id == user_id).all()]
+    if exam_ids:
+        db.query(Evaluation).filter(Evaluation.exam_id.in_(exam_ids)).delete(synchronize_session=False)
+        db.query(Exam).filter(Exam.user_id == user_id).delete(synchronize_session=False)
+
+    db.query(StudyPlan).filter(StudyPlan.user_id == user_id).delete(synchronize_session=False)
+    db.query(RefreshToken).filter(RefreshToken.user_id == user_id).delete(synchronize_session=False)
+    db.query(UserConsent).filter(UserConsent.user_id == user_id).delete(synchronize_session=False)
+
+    original_email = user.email
+    original_name = user.full_name or "there"
+
+    user.email = f"deleted-{user.id}@anonymous.bandami.com"
+    user.full_name = None
+    user.hashed_password = None
+    user.google_id = None
+    user.avatar_url = None
+    user.referred_by = None
+    user.subscription_tier = "deleted"
+
+    email = user.email
+    name = user.full_name or "there"
+    db.commit()
+
+    send_account_deletion_confirmation(to_email=original_email, name=original_name)
+    return {"status": "deleted"}
+
+
+@router.post("/me/evaluations/{exam_id}/appeal")
+@limiter.limit("5/minute")
+async def appeal_evaluation(
+    exam_id: str,
+    body: AppealRequest,
+    user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """GDPR Art.22 — Right to human intervention on automated decisions."""
+    evaluation = db.query(Evaluation).filter(Evaluation.exam_id == exam_id).first()
+    if not evaluation:
+        raise HTTPException(status_code=404, detail="Evaluation not found")
+
+    existing = db.query(ReviewRequest).filter(
+        ReviewRequest.evaluation_id == evaluation.id,
+        ReviewRequest.user_id == user_id,
+    ).first()
+    if existing:
+        return {"status": existing.status, "review_id": str(existing.id)}
+
+    review = ReviewRequest(
+        evaluation_id=str(evaluation.id),
+        user_id=user_id,
+        reason=body.reason,
+    )
+    db.add(review)
+    db.commit()
+
+    user = db.query(UserProfile).filter(UserProfile.id == user_id).first()
+    exam = db.query(Exam).filter(Exam.id == exam_id).first()
+    if user and exam and evaluation.overall_band:
+        send_admin_appeal_notification(
+            user_email=user.email,
+            exam_type=exam.exam_type or "unknown",
+            band=evaluation.overall_band,
+            reason=body.reason,
+        )
+
+    return {"status": "pending", "review_id": str(review.id)}
+
+
+@router.get("/me/reviews")
+async def list_my_reviews(
+    user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    reviews = db.query(ReviewRequest).filter(
+        ReviewRequest.user_id == user_id,
+    ).order_by(ReviewRequest.created_at.desc()).all()
+    return [{
+        "id": str(r.id),
+        "evaluation_id": str(r.evaluation_id),
+        "status": r.status,
+        "reason": r.reason,
+        "resolved_band": r.resolved_band,
+        "reviewer_notes": r.reviewer_notes,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+        "resolved_at": r.resolved_at.isoformat() if r.resolved_at else None,
+    } for r in reviews]
+
+
+# ---- Consent Management (GDPR Art.7) ----
+
+class ConsentRequest(BaseModel):
+    consent_type: str
+    document_id: str
+    granted: bool = True
+
+
+@router.post("/me/consent")
+async def record_consent(
+    body: ConsentRequest,
+    user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Record a user consent decision for audit trail."""
+    consent = UserConsent(
+        user_id=user_id,
+        document_id=body.document_id,
+        consent_type=body.consent_type,
+        granted=body.granted,
+    )
+    db.add(consent)
+    db.commit()
+    return {"status": "recorded"}
+
+
+# ---- GDPR Art.20 — Data Portability ----
+
+@router.get("/me/export")
+@limiter.limit("2/minute")
+async def export_user_data(
+    user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Export all user data in a machine-readable JSON format."""
+    user = db.query(UserProfile).filter(UserProfile.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    exams = db.query(Exam).filter(Exam.user_id == user_id).order_by(Exam.created_at.desc()).all()
+    evaluations = db.query(Evaluation).filter(
+        Evaluation.exam_id.in_([e.id for e in exams])
+    ).order_by(Evaluation.created_at.desc()).all() if exams else []
+
+    payments = db.query(UserPayment).filter(
+        UserPayment.user_id == user_id,
+    ).order_by(UserPayment.created_at.desc()).all()
+
+    study_plans = db.query(StudyPlan).filter(StudyPlan.user_id == user_id).all()
+    subscriptions = db.query(UserSubscription).filter(
+        UserSubscription.user_id == user_id,
+    ).order_by(UserSubscription.current_period_end.desc()).all()
+    reviews = db.query(ReviewRequest).filter(ReviewRequest.user_id == user_id).all()
+    consents = db.query(UserConsent).filter(UserConsent.user_id == user_id).all()
+
+    return {
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "profile": {
+            "id": str(user.id),
+            "email": user.email,
+            "full_name": user.full_name,
+            "subscription_tier": user.subscription_tier,
+            "role": user.role,
+            "created_at": user.created_at.isoformat() if user.created_at else None,
+            "upgraded_at": user.upgraded_at.isoformat() if user.upgraded_at else None,
+        },
+        "exams": [{
+            "id": str(e.id),
+            "type": e.exam_type,
+            "task_type": e.task_type,
+            "status": e.status,
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+        } for e in exams],
+        "evaluations": [{
+            "id": str(ev.id),
+            "exam_id": str(ev.exam_id),
+            "overall_band": ev.overall_band,
+            "criteria_scores": ev.criteria_scores,
+            "created_at": ev.created_at.isoformat() if ev.created_at else None,
+        } for ev in evaluations],
+        "payments": [{
+            "id": str(p.id),
+            "amount": p.amount_clp,
+            "currency": p.currency,
+            "type": p.payment_type,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+        } for p in payments],
+        "subscriptions": [{
+            "id": str(s.id),
+            "plan_id": str(s.plan_id) if s.plan_id else None,
+            "status": s.status,
+            "current_period_end": s.current_period_end.isoformat() if s.current_period_end else None,
+        } for s in subscriptions],
+        "study_plans": len(study_plans),
+        "reviews": len(reviews),
+        "consents": [{
+            "type": c.consent_type,
+            "granted": c.granted,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+        } for c in consents],
+    }

@@ -124,7 +124,9 @@ class BaseSpeakingEvaluator(SpeakingEvaluator):
 
     async def evaluate_speaking(self, transcription: str, detailed: bool = True) -> AIEvaluationResult:
         import time
+        from app.services.privacy import sanitize_for_ai
         start = time.time()
+        transcription = sanitize_for_ai(transcription)
         is_premium = detailed
 
         prompt, max_tokens = self._get_speaking_config(is_premium)

@@ -11,6 +11,8 @@ from uuid import uuid4
 import hashlib
 import secrets
 
+from app.models.consent import UserConsent
+
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
@@ -467,6 +469,16 @@ async def google_callback(
             email_confirmed_at=datetime.now(timezone.utc),
             subscription_tier="free",
         ))
+        db.commit()
+
+        for consent_type, doc_id in [("tos", "tos_v1"), ("ai_processing", "ai_processing_v1")]:
+            db.add(UserConsent(
+                user_id=user_id,
+                document_id=doc_id,
+                consent_type=consent_type,
+                granted=True,
+                ip_address=request.client.host if request.client else None,
+            ))
         db.commit()
 
     access_token = create_access_token(user_id)

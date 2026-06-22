@@ -230,6 +230,11 @@ def send_trial_welcome_email(to_email: str, name: str) -> None:
       </td>
     </tr>
     <tr>
+      <td style="padding: 4px 32px 0; font-size: 12px; color: #94a3b8; line-height: 1.5;">
+        Bandami is an independent practice platform and is not affiliated with Cambridge, IDP, or the British Council. Band scores are AI-generated estimates, not official IELTS results.
+      </td>
+    </tr>
+    <tr>
       <td style="padding: 8px 32px 0;">
         <table cellpadding="0" cellspacing="0">
           {benefit_rows}

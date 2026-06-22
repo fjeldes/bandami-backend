@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import select, desc, text
 from pydantic import BaseModel, Field
@@ -613,6 +613,7 @@ class AppealRequest(BaseModel):
 @router.delete("/me")
 @limiter.limit("3/minute")
 async def delete_account(
+    request: Request,
     user_id: str = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -660,6 +661,7 @@ async def delete_account(
 @router.post("/me/evaluations/{exam_id}/appeal")
 @limiter.limit("5/minute")
 async def appeal_evaluation(
+    request: Request,
     exam_id: str,
     body: AppealRequest,
     user_id: str = Depends(get_current_user),
@@ -749,6 +751,7 @@ async def record_consent(
 @router.get("/me/export")
 @limiter.limit("2/minute")
 async def export_user_data(
+    request: Request,
     user_id: str = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):

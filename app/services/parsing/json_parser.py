@@ -25,14 +25,8 @@ class JsonParser:
             pass
 
         if not result.get("criteria_scores"):
-            logger.warning("AI response missing criteria_scores. Raw: %s", cleaned[:600])
-            try:
-                extracted = cls._extract_partial_json(cleaned)
-                for key in ("criteria_scores", "general_feedback", "detailed_feedback", "grammar_corrections"):
-                    if not result.get(key) and extracted.get(key):
-                        result[key] = extracted[key]
-            except ValueError:
-                pass
+            logger.warning("AI response missing criteria_scores. Raw: %s", cleaned[:300])
+            raise ValueError("Empty criteria_scores — triggering fallback provider")
 
         if not result.get("overall_band"):
             try:

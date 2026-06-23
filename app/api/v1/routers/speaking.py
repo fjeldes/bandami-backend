@@ -233,6 +233,7 @@ async def get_speaking_evaluation(
         id=str(ev.id),
         exam_id=str(ev.exam_id),
         user_submission=ev.user_submission,
+        prompt_text=exam.question.prompt_text if exam.question else None,
         overall_band=ev.overall_band,
         criteria_scores=_filter_speaking_criteria(ev.criteria_scores, is_visible),
         general_feedback=ev.general_feedback or "",

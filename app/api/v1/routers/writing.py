@@ -210,10 +210,13 @@ async def get_writing_evaluation(
         unlocks_at = unlocks_at.replace(tzinfo=timezone.utc)
     is_visible = plan_info.get("tier", "free") == "premium" or plan_info.get("is_admin", False)
 
+    prompt_text = exam.question.prompt_text if exam.question else None
+
     return EvaluationResponse(
         id=str(ev.id),
         exam_id=str(ev.exam_id),
         user_submission=ev.user_submission,
+        prompt_text=prompt_text,
         overall_band=ev.overall_band,
         criteria_scores=_filter_writing_criteria(ev.criteria_scores, is_visible),
         general_feedback=ev.general_feedback or "",

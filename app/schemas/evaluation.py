@@ -95,6 +95,7 @@ class EvaluationResponse(BaseModel):
     id: UUID
     exam_id: UUID
     user_submission: str
+    prompt_text: Optional[str] = None
     overall_band: Optional[float] = None
     criteria_scores: dict
     general_feedback: Optional[str] = None

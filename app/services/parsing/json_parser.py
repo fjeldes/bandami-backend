@@ -4,6 +4,10 @@
 # ============================================================
 
 import json
+import logging
+import re
+
+logger = logging.getLogger(__name__)
 import re
 
 
@@ -14,27 +18,30 @@ class JsonParser:
     def parse(cls, raw: str) -> dict:
         cleaned = cls._strip_markdown(raw)
         result = {}
+        json_ok = False
 
         try:
             result = json.loads(cleaned)
+            json_ok = True
         except json.JSONDecodeError:
             pass
 
-        if not result.get("criteria_scores"):
-            try:
-                extracted = cls._extract_partial_json(cleaned)
-                for key in ("criteria_scores", "general_feedback", "detailed_feedback", "grammar_corrections"):
-                    if not result.get(key) and extracted.get(key):
-                        result[key] = extracted[key]
-            except ValueError:
-                pass
+        if json_ok and len(result.get("criteria_scores", {})) < 4:
+            logger.warning("AI response missing criteria_scores (got %d keys). Raw: %s", 
+                          len(result.get("criteria_scores", {})), cleaned[:300])
+            raise ValueError("Incomplete criteria_scores — triggering fallback provider")
 
         if not result.get("overall_band"):
             try:
                 extracted = cls._extract_partial_json(cleaned)
-                result["overall_band"] = extracted["overall_band"]
+                for key in ("overall_band", "criteria_scores", "general_feedback", "detailed_feedback", "grammar_corrections"):
+                    if not result.get(key) and extracted.get(key):
+                        result[key] = extracted[key]
             except (ValueError, KeyError):
-                raise ValueError(f"AI returned invalid JSON: {raw[:200]}")
+                pass
+
+        if not result.get("overall_band"):
+            raise ValueError(f"AI returned invalid JSON: {raw[:200]}")
         return result
 
     @staticmethod

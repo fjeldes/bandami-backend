@@ -16,6 +16,7 @@ from app.services.providers.base import (
     ReadingEvaluator,
     ListeningEvaluator,
     validate_writing_criteria,
+    generate_fallback_criteria,
 )
 from app.services.prompts.writing import WRITING_DETAILED, WRITING_CONCISE, WRITING_PREMIUM
 from app.services.parsing.json_parser import JsonParser
@@ -47,16 +48,19 @@ class GeminiProvider(BaseSpeakingEvaluator, WritingEvaluator, ReadingEvaluator, 
         text = sanitize_for_ai(text)
         is_premium = detailed
         task_label = "Task 1 (Report/Letter)" if task_type == "task1" else "Task 2 (Essay)"
-        prompt = WRITING_PREMIUM if is_premium else (WRITING_DETAILED if detailed else WRITING_CONCISE)
-        max_tokens = 8192 if is_premium else (8192 if detailed else 2048)
+        base_prompt = WRITING_PREMIUM if is_premium else WRITING_CONCISE
+        max_tokens = 8192 if is_premium else 4096
 
+        result = None
+        criteria = {}
         last_error = None
+
         for attempt in range(self.MAX_RETRIES):
             try:
                 response = self._get_client().models.generate_content(
                     model="gemini-2.5-flash",
                     contents=[
-                        {"role": "user", "parts": [{"text": prompt}]},
+                        {"role": "user", "parts": [{"text": base_prompt}]},
                         {"role": "user", "parts": [{"text": f"IELTS Writing {task_label}\n\nEssay ({len(text.split())} words):\n{text}"}]},
                     ],
                     config={
@@ -68,26 +72,54 @@ class GeminiProvider(BaseSpeakingEvaluator, WritingEvaluator, ReadingEvaluator, 
                 elapsed = int((time.time() - start) * 1000)
                 result = JsonParser.parse(response.text)
                 criteria = result.get("criteria_scores", {})
-                if is_premium:
-                    missing = validate_writing_criteria(criteria, premium=True)
-                    if missing:
-                        logger.warning(f"Writing criteria missing: {missing}")
-                return AIEvaluationResult(
-                    overall_band=result["overall_band"],
-                    criteria_scores=criteria,
-                    general_feedback=result.get("general_feedback", result.get("detailed_feedback", "")),
-                    detailed_feedback=result.get("detailed_feedback", ""),
-                    grammar_corrections=result.get("grammar_corrections", []),
-                    model="gemini-2.5-flash",
-                    tokens=response.usage_metadata.total_token_count if response.usage_metadata else 0,
-                    processing_time_ms=elapsed,
+
+                missing = validate_writing_criteria(criteria, premium=is_premium)
+                if not missing:
+                    return AIEvaluationResult(
+                        overall_band=result["overall_band"],
+                        criteria_scores=criteria,
+                        general_feedback=result.get("general_feedback", result.get("detailed_feedback", "")),
+                        detailed_feedback=result.get("detailed_feedback", ""),
+                        grammar_corrections=result.get("grammar_corrections", []),
+                        model="gemini-2.5-flash",
+                        tokens=response.usage_metadata.total_token_count if response.usage_metadata else 0,
+                        processing_time_ms=elapsed,
+                    )
+
+                logger.warning(f"Gemini writing criteria missing (attempt {attempt + 1}/{self.MAX_RETRIES}): {missing}")
+                base_prompt = (
+                    f"YOUR PREVIOUS RESPONSE WAS REJECTED — you omitted criteria: {', '.join(missing)}.\n\n"
+                    + base_prompt
+                    + "\n\nFIX YOUR MISTAKE: ALL required criteria_scores keys must be present."
                 )
+                max_tokens = min(max_tokens * 2, 16384)
+
             except Exception as e:
                 last_error = e
-                if settings.debug:
-                    logger.warning(f"Gemini writing attempt {attempt + 1}/{self.MAX_RETRIES} failed: {e}")
+                logger.warning(f"Gemini writing attempt {attempt + 1}/{self.MAX_RETRIES} failed: {e}")
                 if attempt < self.MAX_RETRIES - 1:
                     time.sleep(1)
+
+        if result:
+            overall_band = result.get("overall_band", 5.0)
+            if missing:
+                logger.error(
+                    f"Gemini criteria STILL missing after {self.MAX_RETRIES} attempts: {missing}. "
+                    f"Generating fallback from overall_band={overall_band}."
+                )
+                fallback = generate_fallback_criteria(overall_band, premium=is_premium)
+                for key in missing:
+                    criteria[key] = fallback[key]
+            return AIEvaluationResult(
+                overall_band=overall_band,
+                criteria_scores=criteria,
+                general_feedback=result.get("general_feedback", result.get("detailed_feedback", "")),
+                detailed_feedback=result.get("detailed_feedback", ""),
+                grammar_corrections=result.get("grammar_corrections", []),
+                model="gemini-2.5-flash",
+                tokens=0,
+                processing_time_ms=int((time.time() - start) * 1000),
+            )
 
         raise last_error if last_error else Exception("Gemini writing evaluation failed")
 

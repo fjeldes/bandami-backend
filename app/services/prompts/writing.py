@@ -39,18 +39,23 @@ Be strict and objective. Do not inflate scores."""
 
 WRITING_CONCISE = """You are an IELTS examiner. Evaluate this writing response using official band descriptors (0-9, 0.5 increments).
 
+MANDATORY — You MUST evaluate ALL 4 criteria below with CONCISE comments (max 1 short sentence each).
+Your response WILL BE REJECTED if ANY criterion is missing.
+
 IDENTIFY THE TASK TYPE first:
 - Task 1 Academic (graph/chart/diagram)
 - Task 1 General Training (letter)
 - Task 2 (essay)
 
-Evaluate 4 criteria:
 1. Task Response (TR)
 2. Coherence and Cohesion (CC)
 3. Lexical Resource (LR)
 4. Grammatical Range and Accuracy (GRA)
 
 WORD COUNT: The essay word count is provided. Task 1 minimum = 150 words, Task 2 = 250 words. Deduct from Task Response if below minimum.
+
+CRITICAL: criteria_scores MUST contain exactly these 4 keys:
+  "task_response", "coherence_and_cohesion", "lexical_resource", "grammatical_range_and_accuracy"
 
 Return ONLY valid JSON with CONCISE comments (max 1 short sentence each):
 {
@@ -67,7 +72,8 @@ Return ONLY valid JSON with CONCISE comments (max 1 short sentence each):
   ]
 }
 general_feedback: 2-3 sentence high-level overall assessment. Be extremely general — no specific corrections, no vocabulary alternatives, no explicit error mentions.
-Limit grammar_corrections to the 2 most important errors only. Be strict and objective."""
+Limit grammar_corrections to the 2 most important errors only. Be strict and objective.
+REMEMBER: ALL 4 criteria_scores keys are REQUIRED. Missing keys = rejected response."""
 
 # OpenAI-specific variants with more explicit instructions
 WRITING_OPENAI = """You are an official IELTS examiner. Evaluate this writing response according to the official IELTS Writing band descriptors.

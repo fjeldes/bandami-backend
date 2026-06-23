@@ -17,6 +17,7 @@ from app.services.providers.base import (
     ReadingEvaluator,
     ListeningEvaluator,
     validate_writing_criteria,
+    generate_fallback_criteria,
 )
 from app.services.prompts.writing import WRITING_OPENAI, WRITING_PREMIUM
 
@@ -42,42 +43,87 @@ class OpenAIProvider(BaseSpeakingEvaluator, WritingEvaluator, ReadingEvaluator, 
 
     # ---- Writing -----------------------------------------------------------
 
+    MAX_RETRIES = 2
+
     async def evaluate_writing(self, text: str, task_type: str, detailed: bool = True) -> AIEvaluationResult:
         start = time.time()
         text = sanitize_for_ai(text)
         is_premium = detailed
         task_label = "Task 1 (Report/Letter)" if task_type == "task1" else "Task 2 (Essay)"
-        prompt = WRITING_PREMIUM if is_premium else WRITING_OPENAI
+        base_prompt = WRITING_PREMIUM if is_premium else WRITING_OPENAI
         max_tokens = 8192 if is_premium else 4096
 
-        response = await self._get_client().chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": f"IELTS Writing {task_label}\n\nEssay ({len(text.split())} words):\n{text}"},
-            ],
-            temperature=0.3,
-            response_format={"type": "json_object"},
-            max_tokens=max_tokens,
-        )
+        result = None
+        criteria = {}
+        missing = []
+        last_error = None
 
-        elapsed = int((time.time() - start) * 1000)
-        result = json.loads(response.choices[0].message.content)
-        criteria = result.get("criteria_scores", {})
-        missing = validate_writing_criteria(criteria, premium=is_premium)
-        if missing:
-            logger.warning(f"Writing criteria missing: {missing}")
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                response = await self._get_client().chat.completions.create(
+                    model="gpt-4o",
+                    messages=[
+                        {"role": "system", "content": base_prompt},
+                        {"role": "user", "content": f"IELTS Writing {task_label}\n\nEssay ({len(text.split())} words):\n{text}"},
+                    ],
+                    temperature=0.3,
+                    response_format={"type": "json_object"},
+                    max_tokens=max_tokens,
+                )
 
-        return AIEvaluationResult(
-            overall_band=result["overall_band"],
-            criteria_scores=criteria,
-            general_feedback=result.get("general_feedback", result.get("detailed_feedback", "")),
-            detailed_feedback=result.get("detailed_feedback", "") if is_premium else result.get("detailed_feedback", result.get("general_feedback", "")),
-            grammar_corrections=result.get("grammar_corrections", []),
-            model=response.model,
-            tokens=response.usage.total_tokens,
-            processing_time_ms=elapsed,
-        )
+                elapsed = int((time.time() - start) * 1000)
+                result = json.loads(response.choices[0].message.content)
+                criteria = result.get("criteria_scores", {})
+                missing = validate_writing_criteria(criteria, premium=is_premium)
+
+                if not missing:
+                    return AIEvaluationResult(
+                        overall_band=result["overall_band"],
+                        criteria_scores=criteria,
+                        general_feedback=result.get("general_feedback", result.get("detailed_feedback", "")),
+                        detailed_feedback=result.get("detailed_feedback", "") if is_premium else result.get("detailed_feedback", result.get("general_feedback", "")),
+                        grammar_corrections=result.get("grammar_corrections", []),
+                        model=response.model,
+                        tokens=response.usage.total_tokens,
+                        processing_time_ms=elapsed,
+                    )
+
+                logger.warning(f"OpenAI writing criteria missing (attempt {attempt + 1}/{self.MAX_RETRIES}): {missing}")
+                base_prompt = (
+                    f"YOUR PREVIOUS RESPONSE WAS REJECTED — you omitted criteria: {', '.join(missing)}.\n\n"
+                    + base_prompt
+                    + "\n\nFIX YOUR MISTAKE: ALL required criteria_scores keys must be present."
+                )
+                max_tokens = min(max_tokens * 2, 16384)
+
+            except Exception as e:
+                last_error = e
+                logger.warning(f"OpenAI writing attempt {attempt + 1}/{self.MAX_RETRIES} failed: {e}")
+                if attempt < self.MAX_RETRIES - 1:
+                    await asyncio.sleep(1)
+
+        if result:
+            overall_band = result.get("overall_band", 5.0)
+            if missing:
+                logger.error(
+                    f"OpenAI criteria STILL missing after {self.MAX_RETRIES} attempts: {missing}. "
+                    f"Generating fallback from overall_band={overall_band}."
+                )
+                fallback = generate_fallback_criteria(overall_band, premium=is_premium)
+                for key in missing:
+                    criteria[key] = fallback[key]
+            return AIEvaluationResult(
+                overall_band=overall_band,
+                criteria_scores=criteria,
+                general_feedback=result.get("general_feedback", result.get("detailed_feedback", "")),
+                detailed_feedback=result.get("detailed_feedback", "") if is_premium else result.get("detailed_feedback", result.get("general_feedback", "")),
+                grammar_corrections=result.get("grammar_corrections", []),
+                model=result.get("model", "gpt-4o"),
+                tokens=0,
+                processing_time_ms=int((time.time() - start) * 1000),
+            )
+
+        raise last_error if last_error else Exception("OpenAI writing evaluation failed")
 
     # ---- Speaking (template method from BaseSpeakingEvaluator) -------------
 

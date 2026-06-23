@@ -27,7 +27,7 @@ def _is_provider_error(e: Exception) -> bool:
     return any(kw in msg for kw in [
         "timeout", "unavailable", "connection", "503", "500",
         "retry", "deadline", "429", "service", "reset",
-        "overloaded", "capacity", "exhausted",
+        "overloaded", "capacity", "exhausted", "empty",
     ])
 
 
@@ -145,6 +145,12 @@ async def evaluate_writing_endpoint(
 
         logger.info("Evaluation completed exam=%s user=%s tier=%s eval_source=%s band=%s",
                     exam.id, user_id, plan_info.get("tier"), plan_info.get("eval_source"), ev.overall_band)
+
+        logger.info("EvalMetric provider=%s model=%s criteria=%d band=%s has_feedback=%s time_ms=%d tier=%s",
+                    provider.provider_name, result.model or "unknown",
+                    len(result.criteria_scores), ev.overall_band,
+                    bool(result.general_feedback), result.processing_time_ms,
+                    plan_info.get("tier", "free"))
 
         return EvaluationResponse(
             id=str(ev.id),

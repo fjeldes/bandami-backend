@@ -26,9 +26,10 @@ class JsonParser:
         except json.JSONDecodeError:
             pass
 
-        if json_ok and not result.get("criteria_scores"):
-            logger.warning("AI response missing criteria_scores. Raw: %s", cleaned[:300])
-            raise ValueError("Empty criteria_scores — triggering fallback provider")
+        if json_ok and len(result.get("criteria_scores", {})) < 4:
+            logger.warning("AI response missing criteria_scores (got %d keys). Raw: %s", 
+                          len(result.get("criteria_scores", {})), cleaned[:300])
+            raise ValueError("Incomplete criteria_scores — triggering fallback provider")
 
         if not result.get("overall_band"):
             try:

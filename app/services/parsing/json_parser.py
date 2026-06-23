@@ -4,6 +4,10 @@
 # ============================================================
 
 import json
+import logging
+import re
+
+logger = logging.getLogger(__name__)
 import re
 
 
@@ -21,6 +25,7 @@ class JsonParser:
             pass
 
         if not result.get("criteria_scores"):
+            logger.warning("AI response missing criteria_scores. Raw: %s", cleaned[:600])
             try:
                 extracted = cls._extract_partial_json(cleaned)
                 for key in ("criteria_scores", "general_feedback", "detailed_feedback", "grammar_corrections"):

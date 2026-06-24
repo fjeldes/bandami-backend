@@ -48,7 +48,15 @@ class TestQuestionManagement:
     def test_admin_list_questions(self, client, admin_headers):
         res = client.get("/api/v1/admin/questions", headers=admin_headers)
         assert res.status_code == 200
-        assert isinstance(res.json(), list)
+        data = res.json()
+        assert isinstance(data, dict)
+        assert "questions" in data
+        assert "total" in data
+        assert "page" in data
+        assert "per_page" in data
+        assert "total_pages" in data
+        assert "counts" in data
+        assert isinstance(data["questions"], list)
 
     def test_admin_create_delete_question(self, client, admin_headers):
         create_res = client.post("/api/v1/admin/questions", json={

@@ -376,7 +376,7 @@ async def admin_analytics(db: Session = Depends(get_db)):
                COUNT(DISTINCT up.id) FILTER (WHERE up.subscription_tier = 'free') AS free_users,
                COUNT(DISTINCT up.id) FILTER (WHERE up.subscription_tier = 'premium') AS premium_users
         FROM generate_series(
-            :start_date::date,
+            CAST(:start_date AS DATE),
             CURRENT_DATE,
             '1 day'::interval
         ) d
@@ -393,7 +393,7 @@ async def admin_analytics(db: Session = Depends(get_db)):
                COUNT(e.id) FILTER (WHERE up.subscription_tier = 'free') AS free_evals,
                COUNT(e.id) FILTER (WHERE up.subscription_tier = 'premium') AS premium_evals
         FROM generate_series(
-            :start_date::date,
+            CAST(:start_date AS DATE),
             CURRENT_DATE,
             '1 day'::interval
         ) d

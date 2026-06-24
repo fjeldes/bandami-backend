@@ -158,8 +158,37 @@ async def update_user(
 # ---- Questions ----
 
 @router.get("/questions")
-async def list_questions(db: Session = Depends(get_db)):
-    return [_serialize_q(q) for q in db.query(Question).order_by(Question.difficulty).all()]
+async def list_questions(
+    exam_type: Optional[str] = Query(None, description="Filter by exam type: writing or speaking"),
+    page: int = Query(1, ge=1, description="Page number"),
+    per_page: int = Query(10, ge=1, le=100, description="Items per page"),
+    db: Session = Depends(get_db),
+):
+    query = db.query(Question)
+    if exam_type in ("writing", "speaking"):
+        query = query.filter(Question.exam_type == exam_type)
+
+    total = query.count()
+    total_pages = (total + per_page - 1) // per_page if total > 0 else 1
+
+    questions = (
+        query.order_by(Question.difficulty, desc(Question.created_at))
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+        .all()
+    )
+
+    writing_count = db.query(Question).filter(Question.exam_type == "writing").count()
+    speaking_count = db.query(Question).filter(Question.exam_type == "speaking").count()
+
+    return {
+        "questions": [_serialize_q(q) for q in questions],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "total_pages": total_pages,
+        "counts": {"writing": writing_count, "speaking": speaking_count},
+    }
 
 
 @router.post("/questions")

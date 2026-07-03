@@ -5,7 +5,7 @@ Uses SQLAlchemy ORM.
 
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File
 from pydantic import BaseModel
 from typing import Optional
 
@@ -251,7 +251,6 @@ async def upload_question_image(
     db: Session = Depends(get_db),
     file: UploadFile = File(...),
 ):
-    from fastapi import UploadFile, File, HTTPException
     from app.services.storage import upload_question_image as upload_to_gcs
 
     q = db.query(Question).filter(Question.id == question_id).first()

@@ -26,6 +26,8 @@ class Question(Base):
     title = Column(String, nullable=True)
     module = Column(String, default="general")
     is_active = Column(Boolean, default=True, nullable=False)
+    img_url = Column(Text, nullable=True)
+    img_info = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=_now, nullable=False)
 
 

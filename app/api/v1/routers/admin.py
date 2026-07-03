@@ -28,6 +28,8 @@ class QuestionCreate(BaseModel):
     prompt_text: str
     title: Optional[str] = None
     module: Optional[str] = None
+    img_url: Optional[str] = None
+    img_info: Optional[str] = None
 
 
 class QuestionUpdate(BaseModel):
@@ -38,6 +40,8 @@ class QuestionUpdate(BaseModel):
     title: Optional[str] = None
     module: Optional[str] = None
     is_active: Optional[bool] = None
+    img_url: Optional[str] = None
+    img_info: Optional[str] = None
 
 
 class UserUpdate(BaseModel):
@@ -203,6 +207,8 @@ async def create_question(
         prompt_text=body.prompt_text,
         title=body.title,
         module=body.module or "general",
+        img_url=body.img_url,
+        img_info=body.img_info,
     )
     db.add(q)
     db.commit()
@@ -237,6 +243,35 @@ async def delete_question(
     db.query(Question).filter(Question.id == question_id).delete()
     db.commit()
     return {"status": "ok"}
+
+
+@router.post("/questions/{question_id}/image")
+async def upload_question_image(
+    question_id: str,
+    db: Session = Depends(get_db),
+    file: UploadFile = File(...),
+):
+    from fastapi import UploadFile, File, HTTPException
+    from app.services.storage import upload_question_image as upload_to_gcs
+
+    q = db.query(Question).filter(Question.id == question_id).first()
+    if not q:
+        raise HTTPException(status_code=404, detail="Question not found")
+
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="File must be an image")
+
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Image must be smaller than 5MB")
+
+    try:
+        img_url = upload_to_gcs(str(question_id), content, file.content_type)
+        q.img_url = img_url
+        db.commit()
+        return {"img_url": img_url}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 
 # ---- Plans ----
@@ -343,6 +378,7 @@ def _serialize_q(q: Question) -> dict:
         "id": str(q.id), "exam_type": q.exam_type, "task_type": q.task_type,
         "difficulty": q.difficulty, "prompt_text": q.prompt_text,
         "title": q.title, "module": q.module, "is_active": q.is_active,
+        "img_url": q.img_url, "img_info": q.img_info,
     }
 
 

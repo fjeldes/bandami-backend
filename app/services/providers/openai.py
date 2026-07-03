@@ -45,13 +45,19 @@ class OpenAIProvider(BaseSpeakingEvaluator, WritingEvaluator, ReadingEvaluator, 
 
     MAX_RETRIES = 2
 
-    async def evaluate_writing(self, text: str, task_type: str, detailed: bool = True) -> AIEvaluationResult:
+    async def evaluate_writing(self, text: str, task_type: str, prompt_text: str | None = None, img_info: str | None = None, detailed: bool = True) -> AIEvaluationResult:
         start = time.time()
         text = sanitize_for_ai(text)
         is_premium = detailed
         task_label = "Task 1 (Report/Letter)" if task_type == "task1" else "Task 2 (Essay)"
         base_prompt = WRITING_PREMIUM if is_premium else WRITING_OPENAI
         max_tokens = 8192 if is_premium else 4096
+
+        user_content = f"IELTS Writing {task_label}\n\nEssay ({len(text.split())} words):\n{text}"
+        if prompt_text:
+            user_content = f"IELTS Writing {task_label}\n\nQuestion:\n{prompt_text}\n\n{user_content}"
+        if img_info:
+            user_content += f"\n\nImage Description (for reference when evaluating Task 1 with visual data):\n{img_info}"
 
         result = None
         criteria = {}
@@ -64,7 +70,7 @@ class OpenAIProvider(BaseSpeakingEvaluator, WritingEvaluator, ReadingEvaluator, 
                     model="gpt-4o",
                     messages=[
                         {"role": "system", "content": base_prompt},
-                        {"role": "user", "content": f"IELTS Writing {task_label}\n\nEssay ({len(text.split())} words):\n{text}"},
+                        {"role": "user", "content": user_content},
                     ],
                     temperature=0.3,
                     response_format={"type": "json_object"},

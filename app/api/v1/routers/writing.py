@@ -100,15 +100,17 @@ async def evaluate_writing_endpoint(
 
     try:
         task_type = exam.task_type or submission.task_type or "task2"
+        prompt_text = exam.question.prompt_text if exam.question else None
+        img_info = exam.question.img_info if exam.question else None
         try:
-            result = await provider.evaluate_writing(submission.text, task_type, detailed=not is_free)
+            result = await provider.evaluate_writing(submission.text, task_type, prompt_text=prompt_text, img_info=img_info, detailed=not is_free)
         except ProviderUnavailableError:
             fb_name = plan_info.get("fallback_provider")
             if fb_name:
                 logger.info("Primary provider failed, trying fallback=%s", fb_name)
                 from app.services.providers import get_provider
                 fb = get_provider(fb_name)
-                result = await fb.evaluate_writing(submission.text, task_type, detailed=not is_free)
+                result = await fb.evaluate_writing(submission.text, task_type, prompt_text=prompt_text, img_info=img_info, detailed=not is_free)
             else:
                 raise
         except Exception as e:

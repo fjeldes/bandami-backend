@@ -97,7 +97,7 @@ class AIEvaluationResult:
 
 class WritingEvaluator(ABC):
     @abstractmethod
-    async def evaluate_writing(self, text: str, task_type: str, detailed: bool = True) -> AIEvaluationResult: ...
+    async def evaluate_writing(self, text: str, task_type: str, prompt_text: str | None = None, img_info: str | None = None, detailed: bool = True) -> AIEvaluationResult: ...
 
 class SpeakingEvaluator(ABC):
     @abstractmethod

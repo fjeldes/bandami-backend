@@ -48,7 +48,7 @@ class MockAIProvider(WritingEvaluator, SpeakingEvaluator, ReadingEvaluator, List
     @property
     def provider_name(self) -> str: return "gemini"
 
-    async def evaluate_writing(self, text: str, task_type: str, detailed: bool = True) -> AIEvaluationResult:
+    async def evaluate_writing(self, text: str, task_type: str, prompt_text: str | None = None, img_info: str | None = None, detailed: bool = True) -> AIEvaluationResult:
         return AIEvaluationResult(
             overall_band=7.0,
             criteria_scores={

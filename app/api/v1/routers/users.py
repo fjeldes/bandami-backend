@@ -514,6 +514,8 @@ async def get_questions(
         "title": q.title,
         "module": q.module,
         "is_active": q.is_active,
+        "img_url": q.img_url,
+        "img_info": q.img_info,
     } for q in questions]
 
 

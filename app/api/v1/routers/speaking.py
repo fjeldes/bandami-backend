@@ -33,6 +33,15 @@ def _filter_speaking_criteria(criteria: dict, is_visible: bool) -> dict:
     return {k: v for k, v in criteria.items() if k in SPEAKING_CRITERIA_KEYS}
 
 
+def _is_provider_error(e: Exception) -> bool:
+    msg = str(e).lower()
+    return any(kw in msg for kw in [
+        "timeout", "unavailable", "connection", "503", "500",
+        "retry", "deadline", "429", "service", "reset",
+        "overloaded", "capacity", "exhausted", "empty",
+    ])
+
+
 @router.post("/exam", response_model=ExamResponse)
 async def create_speaking_exam(
     body: ExamCreate,
@@ -129,6 +138,12 @@ async def evaluate_speaking_endpoint(
         if audio.content_type and audio.content_type not in allowed_mime:
             raise HTTPException(status_code=415, detail=f"Unsupported audio format: {audio.content_type}. Use WebM, MP3, MP4, WAV, or OGG.")
         
+        # Store audio in GCS first — always persist it before any AI call
+        try:
+            upload_audio_bytes(exam_id, audio_bytes, audio.content_type or "audio/webm")
+        except Exception:
+            logger.warning("Failed to upload audio to GCS for exam=%s", exam_id)
+        
         transcription = await provider.transcribe_audio(audio_bytes, audio.filename or "audio.webm")
         try:
             result = await provider.evaluate_speaking(transcription, detailed=not is_free)
@@ -141,12 +156,18 @@ async def evaluate_speaking_endpoint(
                 result = await fb.evaluate_speaking(transcription, detailed=not is_free)
             else:
                 raise
-
-        # Store audio in GCS for persistence
-        try:
-            upload_audio_bytes(exam_id, audio_bytes, audio.content_type or "audio/webm")
-        except Exception:
-            logger.warning("Failed to upload audio to GCS for exam=%s", exam_id)
+        except Exception as e:
+            if _is_provider_error(e):
+                fb_name = plan_info.get("fallback_provider")
+                if fb_name:
+                    logger.info("Primary provider error, trying fallback=%s", fb_name)
+                    from app.services.providers import get_provider
+                    fb = get_provider(fb_name)
+                    result = await fb.evaluate_speaking(transcription, detailed=not is_free)
+                else:
+                    raise ProviderUnavailableError(str(e)) from e
+            else:
+                raise
 
         ev = Evaluation(
             exam_id=exam.id,
@@ -206,10 +227,10 @@ async def evaluate_speaking_endpoint(
         )
     except Exception as e:
         logger.exception("Evaluation failed for exam=%s user=%s tier=%s eval_source=%s", exam.id, user_id, plan_info.get("tier"), plan_info.get("eval_source"))
-        exam.status = "failed"
+        exam.status = "pending"
         exam.error_message = str(e)[:500]
         db.commit()
-        raise HTTPException(status_code=500, detail="Evaluation failed. Please try again.")
+        raise HTTPException(status_code=503, detail="Our AI agent is currently experiencing high demand. Please try again later.")
 
 
 @router.get("/{exam_id}/evaluation", response_model=EvaluationResponse)

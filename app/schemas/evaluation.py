@@ -8,7 +8,7 @@ from uuid import UUID
 ExamType = Literal["writing", "speaking"]
 ExamStatus = Literal["pending", "processing", "completed", "failed"]
 WritingTask = Literal["task1", "task2"]
-AIProvider = Literal["gemini", "openai"]
+AIProvider = Literal["gemini", "openai", "groq"]
 SubscriptionTier = Literal["free", "premium"]
 EvalSource = Literal["daily", "credit_pack", "pro_monthly", "free", "admin"]
 

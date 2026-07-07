@@ -86,6 +86,77 @@ def send_verification_email(to_email: str, name: str, token: str) -> None:
     )
 
 
+def send_welcome_email(to_email: str, name: str) -> None:
+    """Send welcome email after email verification or Google signup."""
+    dashboard_url = f"{FRONTEND_URL}/dashboard"
+    resources_url = f"{FRONTEND_URL}/resources/writing"
+    band_scores_url = f"{FRONTEND_URL}/resources/band-scores"
+
+    _send_email(
+        to_email,
+        "Welcome to Bandami — Your IELTS journey starts here",
+        f"""
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="utf-8"></head>
+        <body style="font-family: Inter, Arial, sans-serif; background: #f7f9fb; padding: 40px 0;">
+          <table width="100%" cellpadding="0" cellspacing="0" style="max-width: 480px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+            <tr>
+              <td style="padding: 40px 32px 24px; text-align: center;">
+                <img src="{FRONTEND_URL}/bandami.png" alt="Bandami" style="height: 40px; width: auto;" />
+              </td>
+            </tr>
+            <tr>
+              <td style="padding: 0 32px 32px;">
+                <h2 style="font-size: 22px; color: #1e293b; margin: 0 0 8px;">Welcome to Bandami, {name}!</h2>
+                <p style="font-size: 16px; color: #475569; line-height: 1.6; margin: 0 0 24px;">
+                  Thanks for joining. You're one step closer to improving your IELTS score. Here's how to get started.
+                </p>
+
+                <div style="background: #f8fafc; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                  <h3 style="font-size: 16px; color: #1e293b; margin: 0 0 12px;">🎯 Your first step</h3>
+                  <p style="font-size: 15px; color: #475569; line-height: 1.6; margin: 0;">
+                    Complete your first Writing or Speaking practice. You get <strong>4 free practices per day</strong> to start.
+                  </p>
+                </div>
+
+                <div style="background: #f0fdf4; border-radius: 10px; padding: 20px; margin-bottom: 20px;">
+                  <h3 style="font-size: 16px; color: #1e293b; margin: 0 0 12px;">💡 Quick tips to start</h3>
+                  <ul style="font-size: 15px; color: #475569; line-height: 1.8; margin: 0; padding-left: 20px;">
+                    <li>Read the prompt carefully before writing</li>
+                    <li>Use connectors to link your ideas (we have a guide!)</li>
+                    <li>Track your progress in your Dashboard</li>
+                  </ul>
+                </div>
+
+                <div style="display: flex; gap: 12px; margin-bottom: 20px;">
+                  <a href="{resources_url}" style="flex: 1; display: block; background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; text-decoration: none; text-align: center; padding: 12px 16px; border-radius: 8px; font-size: 14px; font-weight: 500;">
+                    📝 Writing Tips
+                  </a>
+                  <a href="{band_scores_url}" style="flex: 1; display: block; background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; text-decoration: none; text-align: center; padding: 12px 16px; border-radius: 8px; font-size: 14px; font-weight: 500;">
+                    📊 Band Scores Guide
+                  </a>
+                </div>
+
+                <a href="{dashboard_url}" style="display: block; width: 100%; background: #2563eb; color: #ffffff; text-decoration: none; text-align: center; padding: 14px 0; border-radius: 8px; font-weight: 600; font-size: 16px; box-sizing: border-box;">
+                  Go to Dashboard
+                </a>
+
+                <p style="font-size: 14px; color: #94a3b8; text-align: center; margin: 24px 0 0;">
+                  Questions? Email us at <a href="mailto:contacto@bandami.com" style="color: #2563eb;">contacto@bandami.com</a>
+                </p>
+              </td>
+            </tr>
+          </table>
+          <p style="font-size: 12px; color: #94a3b8; text-align: center; margin: 20px 0 0; max-width: 480px;">
+            Bandami is an independent platform and is not affiliated with Cambridge, IDP, or the British Council. Band scores are AI-generated estimates for practice purposes only.
+          </p>
+        </body>
+        </html>
+        """,
+    )
+
+
 def send_password_reset_email(to_email: str, name: str, token: str) -> None:
     reset_url = f"{FRONTEND_URL}/auth/callback?token={token}&type=reset"
 

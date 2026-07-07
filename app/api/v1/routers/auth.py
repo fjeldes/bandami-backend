@@ -28,7 +28,7 @@ from app.core.security import (
     decode_verification_token,
 )
 from app.core.security import decode_token as _decode_token
-from app.services.email_service import send_verification_email, send_password_reset_email
+from app.services.email_service import send_verification_email, send_password_reset_email, send_welcome_email
 from app.core.limiter import limiter
 from app.core.auth import _calc_plan_info
 

@@ -3,7 +3,7 @@ Groq Provider — Free-tier fallback (30 req/min, 1000 req/day).
 LPU-accelerated inference, OpenAI-compatible API.
 Model: llama-3.3-70b-versatile
 """
-from openai import OpenAI
+from openai import AsyncOpenAI
 from app.core.config import get_settings
 from app.services.providers.openai import OpenAIProvider
 
@@ -14,7 +14,7 @@ class GroqProvider(OpenAIProvider):
             s = get_settings()
             if not s.groq_api_key:
                 raise ValueError("GROQ_API_KEY not configured")
-            self._client = OpenAI(
+            self._client = AsyncOpenAI(
                 base_url="https://api.groq.com/openai/v1",
                 api_key=s.groq_api_key.strip(),
             )

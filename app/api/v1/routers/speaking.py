@@ -1,5 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request, Response
 from uuid import UUID
 from sqlalchemy.orm import Session
 
@@ -13,7 +12,7 @@ from app.core.auth import (
     get_ai_provider,
     compute_feedback_unlocks_at,
 )
-from app.services.storage import upload_audio_bytes, get_audio_url
+from app.services.storage import upload_audio_bytes, download_audio_bytes
 
 import logging
 logger = logging.getLogger(__name__)
@@ -201,18 +200,9 @@ async def evaluate_speaking_endpoint(
 
         exam.status = "completed"
         exam.completed_at = datetime.now(timezone.utc)
-        db.commit()
-        db.refresh(ev)
 
-        # Update last_active_at
-        from app.models.user import UserProfile
-        db.query(UserProfile).filter(UserProfile.id == user_id).update({UserProfile.last_active_at: datetime.now(timezone.utc)})
-        db.commit()
-
-        logger.info("Evaluation completed exam=%s user=%s tier=%s eval_source=%s band=%s",
-                    exam.id, user_id, plan_info.get("tier"), plan_info.get("eval_source"), ev.overall_band)
-
-        return EvaluationResponse(
+        # Validate response before committing — if Pydantic fails, rollback prevents orphan Evaluation
+        eval_response = EvaluationResponse(
             id=str(ev.id),
             exam_id=str(ev.exam_id),
             user_submission=transcription,
@@ -230,6 +220,19 @@ async def evaluate_speaking_endpoint(
             created_at=ev.created_at,
             exam_status=exam.status,
         )
+
+        db.commit()
+        db.refresh(ev)
+
+        # Update last_active_at
+        from app.models.user import UserProfile
+        db.query(UserProfile).filter(UserProfile.id == user_id).update({UserProfile.last_active_at: datetime.now(timezone.utc)})
+        db.commit()
+
+        logger.info("Evaluation completed exam=%s user=%s tier=%s eval_source=%s band=%s",
+                    exam.id, user_id, plan_info.get("tier"), plan_info.get("eval_source"), ev.overall_band)
+
+        return eval_response
 
     except ProviderUnavailableError as e:
         logger.warning("Provider unavailable: %s tier=%s eval_source=%s", e, plan_info.get("tier"), plan_info.get("eval_source"))
@@ -328,7 +331,7 @@ async def get_speaking_audio(
         raise HTTPException(status_code=404, detail="Exam not found")
 
     try:
-        url = get_audio_url(exam_id)
-        return RedirectResponse(url=url, status_code=302)
+        audio_bytes, content_type = download_audio_bytes(exam_id)
+        return Response(content=audio_bytes, media_type=content_type)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Audio not found")

@@ -43,6 +43,8 @@ def _calc_plan_info(db: Session, user_id: str) -> dict:
 
     is_admin = db.execute(select(UserProfile.role).where(UserProfile.id == user_id)).scalar() == "admin"
     if is_admin:
+        if settings.environment == "development":
+            return {"tier": "premium", "provider": "groq", "fallback_provider": "gemini", "daily_eval_limit": 999, "feedback_delay_hours": 0, "referral_discounts": 0, "is_admin": True}
         return {"tier": "premium", "provider": "gemini", "fallback_provider": "groq", "daily_eval_limit": 999, "feedback_delay_hours": 0, "referral_discounts": 0, "is_admin": True}
 
     now = datetime.now(timezone.utc)
@@ -59,14 +61,19 @@ def _calc_plan_info(db: Session, user_id: str) -> dict:
         .first()
     )
 
-    provider = "openai"
-    if settings.environment == "development":
-        provider = "gemini"
-
     if sub:
+        if settings.environment == "development":
+            return {
+                "tier": "premium",
+                "provider": "groq",
+                "fallback_provider": "gemini",
+                "feedback_delay_hours": 0,
+                "referral_discounts": user.referral_discounts if user else 0,
+                "is_admin": False,
+            }
         return {
             "tier": "premium",
-            "provider": provider,
+            "provider": "openai",
             "fallback_provider": "groq",
             "feedback_delay_hours": 0,
             "referral_discounts": user.referral_discounts if user else 0,

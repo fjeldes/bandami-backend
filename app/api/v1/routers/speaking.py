@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
-from fastapi.responses import Response
+from fastapi.responses import RedirectResponse
 from uuid import UUID
 from sqlalchemy.orm import Session
 
@@ -13,7 +13,7 @@ from app.core.auth import (
     get_ai_provider,
     compute_feedback_unlocks_at,
 )
-from app.services.storage import upload_audio_bytes, download_audio_bytes
+from app.services.storage import upload_audio_bytes, get_audio_url
 
 import logging
 logger = logging.getLogger(__name__)
@@ -293,7 +293,7 @@ async def get_speaking_audio(
         raise HTTPException(status_code=404, detail="Exam not found")
 
     try:
-        audio_bytes, content_type = download_audio_bytes(exam_id)
-        return Response(content=audio_bytes, media_type=content_type)
+        url = get_audio_url(exam_id)
+        return RedirectResponse(url=url, status_code=302)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Audio not found")

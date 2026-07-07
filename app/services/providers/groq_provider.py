@@ -35,3 +35,11 @@ class GroqProvider(OpenAIProvider):
             response_format={"type": "json_object"},
             max_tokens=max_tokens,
         )
+
+    async def transcribe_audio(self, audio_bytes: bytes, filename: str) -> str:
+        response = await self._get_client().audio.transcriptions.create(
+            model="whisper-large-v3",
+            file=(filename, audio_bytes, self._get_mime_type(filename)),
+            language="en",
+        )
+        return response.text

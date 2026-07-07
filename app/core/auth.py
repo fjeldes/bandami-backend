@@ -75,8 +75,8 @@ def _calc_plan_info(db: Session, user_id: str) -> dict:
 
     return {
         "tier": "free",
-        "provider": "gemini",
-        "fallback_provider": "groq",
+        "provider": "groq",
+        "fallback_provider": "gemini",
         "feedback_delay_hours": 0,
         "referral_discounts": user.referral_discounts if user else 0,
         "is_admin": False,
@@ -113,7 +113,8 @@ async def check_daily_limit(
             return user_plan
 
         user_plan["tier"] = "free"
-        user_plan["provider"] = "gemini"
+        user_plan["provider"] = "groq"
+        user_plan["fallback_provider"] = "gemini"
         user_plan["eval_source"] = "free"
         return user_plan
 

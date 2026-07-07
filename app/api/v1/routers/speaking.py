@@ -144,13 +144,27 @@ async def evaluate_speaking_endpoint(
         except Exception:
             logger.warning("Failed to upload audio to GCS for exam=%s", exam_id)
         
-        transcription = await provider.transcribe_audio(audio_bytes, audio.filename or "audio.webm")
+        try:
+            transcription = await provider.transcribe_audio(audio_bytes, audio.filename or "audio.webm")
+        except Exception as e:
+            if _is_provider_error(e):
+                fb_name = plan_info.get("fallback_provider")
+                if fb_name:
+                    logger.info("Primary transcription failed, trying fallback=%s", fb_name)
+                    from app.services.providers import get_provider
+                    fb = get_provider(fb_name)
+                    transcription = await fb.transcribe_audio(audio_bytes, audio.filename or "audio.webm")
+                else:
+                    raise ProviderUnavailableError(str(e)) from e
+            else:
+                raise
+
         try:
             result = await provider.evaluate_speaking(transcription, detailed=not is_free)
         except ProviderUnavailableError:
             fb_name = plan_info.get("fallback_provider")
             if fb_name:
-                logger.info("Primary provider failed, trying fallback=%s", fb_name)
+                logger.info("Primary evaluation failed, trying fallback=%s", fb_name)
                 from app.services.providers import get_provider
                 fb = get_provider(fb_name)
                 result = await fb.evaluate_speaking(transcription, detailed=not is_free)
@@ -160,7 +174,7 @@ async def evaluate_speaking_endpoint(
             if _is_provider_error(e):
                 fb_name = plan_info.get("fallback_provider")
                 if fb_name:
-                    logger.info("Primary provider error, trying fallback=%s", fb_name)
+                    logger.info("Primary evaluation error, trying fallback=%s", fb_name)
                     from app.services.providers import get_provider
                     fb = get_provider(fb_name)
                     result = await fb.evaluate_speaking(transcription, detailed=not is_free)

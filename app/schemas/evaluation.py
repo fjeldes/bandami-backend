@@ -109,6 +109,7 @@ class EvaluationResponse(BaseModel):
     is_feedback_visible: bool = True
     upgraded_text: Optional[str] = None
     created_at: datetime
+    exam_status: Optional[str] = None
 
 
 # ---- Dashboard ----

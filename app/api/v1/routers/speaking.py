@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
-from fastapi.responses import FileResponse, RedirectResponse
-import os
+from fastapi.responses import Response
+from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.db.deps import get_db
@@ -13,7 +13,7 @@ from app.core.auth import (
     get_ai_provider,
     compute_feedback_unlocks_at,
 )
-from app.services.storage import upload_audio_bytes, get_audio_url
+from app.services.storage import upload_audio_bytes, download_audio_bytes
 
 import logging
 logger = logging.getLogger(__name__)
@@ -101,8 +101,12 @@ async def evaluate_speaking_endpoint(
 
     if not exam:
         raise HTTPException(status_code=404, detail="Exam not found")
-    if exam.status != "pending":
+    if exam.status not in ("pending", "failed"):
         raise HTTPException(status_code=400, detail="Exam already processed")
+    if exam.status == "failed":
+        db.query(Evaluation).filter(Evaluation.exam_id == exam.id).delete()
+        exam.status = "pending"
+        db.commit()
 
     is_free = plan_info.get("tier", "free") != "premium"
     delay_hours = plan_info.get("feedback_delay_hours", 0)
@@ -140,7 +144,6 @@ async def evaluate_speaking_endpoint(
 
         # Store audio in GCS for persistence
         try:
-            from app.services.storage import upload_audio_bytes
             upload_audio_bytes(exam_id, audio_bytes, audio.content_type or "audio/webm")
         except Exception:
             logger.warning("Failed to upload audio to GCS for exam=%s", exam_id)
@@ -190,6 +193,7 @@ async def evaluate_speaking_endpoint(
             feedback_unlocks_at=unlocks_at,
             is_feedback_visible=is_visible,
             created_at=ev.created_at,
+            exam_status=exam.status,
         )
 
     except ProviderUnavailableError as e:
@@ -203,6 +207,7 @@ async def evaluate_speaking_endpoint(
     except Exception as e:
         logger.exception("Evaluation failed for exam=%s user=%s tier=%s eval_source=%s", exam.id, user_id, plan_info.get("tier"), plan_info.get("eval_source"))
         exam.status = "failed"
+        exam.error_message = str(e)[:500]
         db.commit()
         raise HTTPException(status_code=500, detail="Evaluation failed. Please try again.")
 
@@ -220,7 +225,27 @@ async def get_speaking_evaluation(
 
     ev = db.query(Evaluation).filter(Evaluation.exam_id == exam_id).first()
     if not ev:
-        raise HTTPException(status_code=404, detail="Evaluation not found")
+        now = datetime.now(timezone.utc)
+        is_visible = plan_info.get("tier", "free") == "premium" or plan_info.get("is_admin", False)
+        return EvaluationResponse(
+            id=UUID(int=0),
+            exam_id=UUID(exam_id) if isinstance(exam_id, str) else exam_id,
+            user_submission="",
+            overall_band=None,
+            criteria_scores={},
+            general_feedback=None,
+            detailed_feedback=None,
+            grammar_corrections=[],
+            provider_used="gemini",
+            ai_model_used=None,
+            tokens_used=None,
+            processing_time_ms=None,
+            feedback_unlocks_at=now,
+            is_feedback_visible=is_visible,
+            upgraded_text=None,
+            created_at=now,
+            exam_status=exam.status,
+        )
 
     unlocks_at = ev.feedback_unlocks_at
 
@@ -247,6 +272,7 @@ async def get_speaking_evaluation(
         is_feedback_visible=is_visible,
         upgraded_text=ev.upgraded_text,
         created_at=ev.created_at,
+        exam_status=exam.status,
     )
 
 
@@ -267,7 +293,7 @@ async def get_speaking_audio(
         raise HTTPException(status_code=404, detail="Exam not found")
 
     try:
-        url = get_audio_url(exam_id)
-        return RedirectResponse(url=url, status_code=302)
-    except Exception:
+        audio_bytes, content_type = download_audio_bytes(exam_id)
+        return Response(content=audio_bytes, media_type=content_type)
+    except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Audio not found")

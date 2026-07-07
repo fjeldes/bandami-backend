@@ -43,6 +43,7 @@ class Exam(Base):
     attempt_number = Column(Integer, nullable=False, default=1)
     time_taken_seconds = Column(Integer, nullable=True)
     eval_source = Column(String, nullable=False, default="daily")
+    error_message = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=_now, nullable=False)
     completed_at = Column(DateTime(timezone=True), nullable=True)
 

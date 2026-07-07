@@ -23,3 +23,15 @@ class GroqProvider(OpenAIProvider):
     @property
     def provider_name(self) -> str:
         return "groq"
+
+    async def _call_ai(self, prompt: str, transcription: str, max_tokens: int, temperature: float):
+        return await self._get_client().chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": f"IELTS Speaking Response:\n{transcription}"},
+            ],
+            temperature=temperature,
+            response_format={"type": "json_object"},
+            max_tokens=max_tokens,
+        )

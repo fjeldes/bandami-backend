@@ -117,7 +117,6 @@ async def evaluate_writing_endpoint(
             if _is_provider_error(e):
                 raise ProviderUnavailableError(str(e)) from e
             raise
-            raise
 
         ev = Evaluation(
             exam_id=exam.id,

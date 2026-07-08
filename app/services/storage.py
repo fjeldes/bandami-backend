@@ -1,31 +1,14 @@
 """
 Google Cloud Storage service for audio and image file persistence.
-Signed URLs require GCS_SA_KEY env var with a service account JSON key.
-Without it, falls back to direct download (less efficient but no IAM needed).
+Audio is stored for re-analysis retry purposes only - no playback streaming.
 """
-import json
 import os
 import logging
-from datetime import timedelta
 from google.cloud import storage
-from google.oauth2 import service_account
 
 logger = logging.getLogger("ielts.storage")
 
 BUCKET_NAME = os.environ.get("GCS_AUDIO_BUCKET", "bandami-dev-audio")
-
-
-def _get_signing_credentials():
-    """Load service account key for signed URL generation, or None."""
-    raw = os.environ.get("GCS_SA_KEY")
-    if not raw:
-        return None
-    try:
-        key_data = json.loads(raw)
-        return service_account.Credentials.from_service_account_info(key_data)
-    except Exception:
-        logger.warning("Failed to parse GCS_SA_KEY, falling back to direct download")
-        return None
 
 
 def _get_bucket():
@@ -38,30 +21,6 @@ def upload_audio_bytes(exam_id: str, audio_bytes: bytes, content_type: str = "au
     blob = _get_bucket().blob(f"audio/{exam_id}.webm")
     blob.upload_from_string(audio_bytes, content_type=content_type)
     return blob.name
-
-
-def get_audio_signed_url(exam_id: str) -> str:
-    """Generate a 10-minute signed URL using a service account key.
-    Raises FileNotFoundError if audio missing, ValueError if no signing key available."""
-    blob = _get_bucket().blob(f"audio/{exam_id}.webm")
-    if not blob.exists():
-        raise FileNotFoundError(f"Audio not found: {exam_id}")
-    creds = _get_signing_credentials()
-    if not creds:
-        raise ValueError("GCS_SA_KEY not configured — cannot generate signed URL")
-    return blob.generate_signed_url(
-        expiration=timedelta(minutes=10),
-        method="GET",
-        credentials=creds,
-    )
-
-
-def download_audio_bytes(exam_id: str) -> tuple[bytes, str]:
-    """Download audio bytes from GCS. Returns (bytes, content_type)."""
-    blob = _get_bucket().blob(f"audio/{exam_id}.webm")
-    if not blob.exists():
-        raise FileNotFoundError(f"Audio not found: {exam_id}")
-    return blob.download_as_bytes(), "audio/webm"
 
 
 def delete_audio(exam_id: str):

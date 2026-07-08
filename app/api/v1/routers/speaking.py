@@ -1,5 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request, Response
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
 from uuid import UUID
 from sqlalchemy.orm import Session
 
@@ -13,14 +12,12 @@ from app.core.auth import (
     get_ai_provider,
     compute_feedback_unlocks_at,
 )
-from app.services.storage import upload_audio_bytes, get_audio_signed_url, download_audio_bytes
 
 import logging
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("ielts.speaking")
 from app.core.limiter import limiter
 from app.services.providers.base import SpeakingEvaluator, SPEAKING_CRITERIA_KEYS, ProviderUnavailableError
 from datetime import datetime, timezone
-import logging
 
 logger = logging.getLogger("ielts.speaking")
 router = APIRouter()
@@ -126,6 +123,7 @@ async def evaluate_speaking_endpoint(
     exam.eval_source = plan_info.get("eval_source", "free")
     db.commit()
 
+    # Store audio in GCS first — always persist it before any AI call
     try:
         audio_bytes = await audio.read()
         
@@ -138,11 +136,7 @@ async def evaluate_speaking_endpoint(
         if audio.content_type and audio.content_type not in allowed_mime:
             raise HTTPException(status_code=415, detail=f"Unsupported audio format: {audio.content_type}. Use WebM, MP3, MP4, WAV, or OGG.")
         
-        # Store audio in GCS first — always persist it before any AI call
-        try:
-            upload_audio_bytes(exam_id, audio_bytes, audio.content_type or "audio/webm")
-        except Exception:
-            logger.warning("Failed to upload audio to GCS for exam=%s", exam_id)
+        upload_audio_bytes(exam_id, audio_bytes, audio.content_type or "audio/webm")
         
         try:
             transcription = await provider.transcribe_audio(audio_bytes, audio.filename or "audio.webm")
@@ -315,33 +309,4 @@ async def get_speaking_evaluation(
     )
 
 
-@router.get("/{exam_id}/audio")
-async def get_speaking_audio(
-    exam_id: str,
-    user_id: str = Depends(get_current_user),
-    db: Session = Depends(get_db),
-    plan_info: dict = Depends(get_user_plan_info),
-):
-    """Stream the original audio recording (premium only)."""
-    is_premium = plan_info.get("tier", "free") == "premium" or plan_info.get("is_admin", False)
-    if not is_premium:
-        raise HTTPException(status_code=402, detail="Audio playback is a Premium feature")
 
-    exam = db.query(Exam).filter(Exam.id == exam_id, Exam.user_id == user_id).first()
-    if not exam:
-        raise HTTPException(status_code=404, detail="Exam not found")
-
-    try:
-        url = get_audio_signed_url(exam_id)
-        return RedirectResponse(url=url, status_code=302)
-    except ValueError:
-        # No signing key configured — fall back to direct download
-        pass
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Audio not found")
-
-    try:
-        audio_bytes, content_type = download_audio_bytes(exam_id)
-        return Response(content=audio_bytes, media_type=content_type)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Audio not found")

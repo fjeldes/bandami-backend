@@ -22,7 +22,7 @@ logger = logging.getLogger("ielts.groq")
 
 
 class GroqProvider(OpenAIProvider):
-    WRITING_MODEL = "llama-3.3-70b-versatile"
+    MODEL = "llama-3.3-70b-versatile"
 
     def _get_client(self):
         if self._client is None:
@@ -41,7 +41,7 @@ class GroqProvider(OpenAIProvider):
 
     async def _call_ai(self, prompt: str, transcription: str, max_tokens: int, temperature: float):
         return await self._get_client().chat.completions.create(
-            model=self.WRITING_MODEL,
+            model=self.MODEL,
             messages=[
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": f"IELTS Speaking Response:\n{transcription}"},
@@ -49,6 +49,26 @@ class GroqProvider(OpenAIProvider):
             temperature=temperature,
             response_format={"type": "json_object"},
             max_tokens=max_tokens,
+        )
+
+    def _parse_response(self, response) -> dict:
+        content = response.choices[0].message.content if response.choices else None
+        if not content:
+            raise ValueError("Empty response content from Groq")
+        return json.loads(content)
+
+    def _build_result(self, parsed: dict, criteria: dict, transcription: str, response) -> AIEvaluationResult:
+        usage = getattr(response, 'usage', None)
+        return AIEvaluationResult(
+            overall_band=parsed["overall_band"],
+            criteria_scores=criteria,
+            general_feedback=parsed.get("general_feedback", parsed.get("detailed_feedback", "")),
+            detailed_feedback=parsed.get("detailed_feedback", ""),
+            grammar_corrections=parsed.get("grammar_corrections", []),
+            transcription=transcription,
+            model=getattr(response, 'model', self.MODEL),
+            tokens=usage.total_tokens if usage else 0,
+            processing_time_ms=0,
         )
 
     async def evaluate_writing(self, text: str, task_type: str, prompt_text: str | None = None, img_info: str | None = None, detailed: bool = True) -> AIEvaluationResult:
@@ -73,7 +93,7 @@ class GroqProvider(OpenAIProvider):
         for attempt in range(self.MAX_RETRIES):
             try:
                 response = await self._get_client().chat.completions.create(
-                    model=self.WRITING_MODEL,
+                    model=self.MODEL,
                     messages=[
                         {"role": "system", "content": base_prompt},
                         {"role": "user", "content": user_content},
@@ -96,7 +116,7 @@ class GroqProvider(OpenAIProvider):
                         detailed_feedback=result.get("detailed_feedback", "") if is_premium else result.get("detailed_feedback", result.get("general_feedback", "")),
                         grammar_corrections=result.get("grammar_corrections", []),
                         model=response.model,
-                        tokens=response.usage.total_tokens,
+                        tokens=response.usage.total_tokens if response.usage else 0,
                         processing_time_ms=elapsed,
                     )
 
@@ -130,7 +150,7 @@ class GroqProvider(OpenAIProvider):
                 general_feedback=result.get("general_feedback", result.get("detailed_feedback", "")),
                 detailed_feedback=result.get("detailed_feedback", "") if is_premium else result.get("detailed_feedback", result.get("general_feedback", "")),
                 grammar_corrections=result.get("grammar_corrections", []),
-                model=result.get("model", self.WRITING_MODEL),
+                model=result.get("model", self.MODEL),
                 tokens=0,
                 processing_time_ms=int((time.time() - start) * 1000),
             )
@@ -140,7 +160,7 @@ class GroqProvider(OpenAIProvider):
     async def evaluate_reading(self, answers: dict, detailed: bool = True) -> AIEvaluationResult:
         start = time.time()
         response = await self._get_client().chat.completions.create(
-            model=self.WRITING_MODEL,
+            model=self.MODEL,
             messages=[
                 {"role": "system", "content": (
                     "You are an IELTS Reading examiner. Evaluate submitted answers and return JSON: "
@@ -161,13 +181,13 @@ class GroqProvider(OpenAIProvider):
             general_feedback=result.get("general_feedback", result.get("detailed_feedback", "")),
             detailed_feedback=result["detailed_feedback"],
             grammar_corrections=result.get("grammar_corrections", []),
-            model=response.model, tokens=response.usage.total_tokens, processing_time_ms=elapsed,
+            model=response.model, tokens=response.usage.total_tokens if response.usage else 0, processing_time_ms=elapsed,
         )
 
     async def evaluate_listening(self, answers: dict, detailed: bool = True) -> AIEvaluationResult:
         start = time.time()
         response = await self._get_client().chat.completions.create(
-            model=self.WRITING_MODEL,
+            model=self.MODEL,
             messages=[
                 {"role": "system", "content": (
                     "You are an IELTS Listening examiner. Evaluate answers and return JSON: "
@@ -187,7 +207,7 @@ class GroqProvider(OpenAIProvider):
             general_feedback=result.get("general_feedback", result.get("detailed_feedback", "")),
             detailed_feedback=result["detailed_feedback"],
             grammar_corrections=[],
-            model=response.model, tokens=response.usage.total_tokens, processing_time_ms=elapsed,
+            model=response.model, tokens=response.usage.total_tokens if response.usage else 0, processing_time_ms=elapsed,
         )
 
     async def transcribe_audio(self, audio_bytes: bytes, filename: str) -> str:

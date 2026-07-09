@@ -12,6 +12,7 @@ from app.core.auth import (
     get_ai_provider,
     compute_feedback_unlocks_at,
 )
+from app.services.storage import upload_audio_bytes
 
 import logging
 logger = logging.getLogger("ielts.speaking")
@@ -19,7 +20,6 @@ from app.core.limiter import limiter
 from app.services.providers.base import SpeakingEvaluator, SPEAKING_CRITERIA_KEYS, ProviderUnavailableError
 from datetime import datetime, timezone
 
-logger = logging.getLogger("ielts.speaking")
 router = APIRouter()
 
 

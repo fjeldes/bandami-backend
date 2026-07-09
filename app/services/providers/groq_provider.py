@@ -6,6 +6,7 @@ Model: llama-3.3-70b-versatile
 import json
 import time
 import asyncio
+import httpx
 import logging
 from openai import AsyncOpenAI
 from app.core.config import get_settings
@@ -32,6 +33,7 @@ class GroqProvider(OpenAIProvider):
             self._client = AsyncOpenAI(
                 base_url="https://api.groq.com/openai/v1",
                 api_key=s.groq_api_key.strip(),
+                timeout=httpx.Timeout(120.0, connect=10.0),
             )
         return self._client
 

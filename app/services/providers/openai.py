@@ -6,6 +6,7 @@
 import json
 import time
 import asyncio
+import httpx
 from app.services.privacy import sanitize_for_ai
 import logging
 from openai import AsyncOpenAI
@@ -34,7 +35,10 @@ class OpenAIProvider(BaseSpeakingEvaluator, WritingEvaluator, ReadingEvaluator, 
         if self._client is None:
             if not settings.openai_api_key:
                 raise ValueError("OpenAI API key not configured")
-            self._client = AsyncOpenAI(api_key=settings.openai_api_key)
+            self._client = AsyncOpenAI(
+                api_key=settings.openai_api_key,
+                timeout=httpx.Timeout(120.0, connect=10.0),
+            )
         return self._client
 
     @property

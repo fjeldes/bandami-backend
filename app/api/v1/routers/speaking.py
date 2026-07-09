@@ -15,6 +15,7 @@ from app.core.auth import (
 from app.services.storage import upload_audio_bytes, download_audio_bytes
 
 import logging
+import asyncio
 logger = logging.getLogger("ielts.speaking")
 from app.core.limiter import limiter
 from app.services.providers.base import SpeakingEvaluator, SPEAKING_CRITERIA_KEYS, ProviderUnavailableError
@@ -136,31 +137,35 @@ async def evaluate_speaking_endpoint(
         if audio.content_type and audio.content_type not in allowed_mime:
             raise HTTPException(status_code=415, detail=f"Unsupported audio format: {audio.content_type}. Use WebM, MP3, MP4, WAV, or OGG.")
         
-        upload_audio_bytes(exam_id, audio_bytes, audio.content_type or "audio/webm")
+        await asyncio.to_thread(upload_audio_bytes, str(exam.id), audio_bytes, audio.content_type or "audio/webm")
         
+        transcribe_provider = provider
         try:
             transcription = await provider.transcribe_audio(audio_bytes, audio.filename or "audio.webm")
         except Exception as e:
             if _is_provider_error(e):
                 fb_name = plan_info.get("fallback_provider")
                 if fb_name:
-                    logger.info("Primary transcription failed, trying fallback=%s", fb_name)
+                    logger.warning("Primary transcription failed for exam=%s provider=%s error=%s, trying fallback=%s", exam.id, provider.provider_name, str(e)[:200], fb_name)
                     from app.services.providers import get_provider
                     fb = get_provider(fb_name)
+                    transcribe_provider = fb
                     transcription = await fb.transcribe_audio(audio_bytes, audio.filename or "audio.webm")
                 else:
                     raise ProviderUnavailableError(str(e)) from e
             else:
                 raise
 
+        eval_provider = provider
         try:
             result = await provider.evaluate_speaking(transcription, detailed=not is_free)
         except ProviderUnavailableError:
             fb_name = plan_info.get("fallback_provider")
             if fb_name:
-                logger.info("Primary evaluation failed, trying fallback=%s", fb_name)
+                logger.warning("Primary evaluation unavailable for exam=%s provider=%s, trying fallback=%s", exam.id, provider.provider_name, fb_name)
                 from app.services.providers import get_provider
                 fb = get_provider(fb_name)
+                eval_provider = fb
                 result = await fb.evaluate_speaking(transcription, detailed=not is_free)
             else:
                 raise
@@ -168,9 +173,10 @@ async def evaluate_speaking_endpoint(
             if _is_provider_error(e):
                 fb_name = plan_info.get("fallback_provider")
                 if fb_name:
-                    logger.info("Primary evaluation error, trying fallback=%s", fb_name)
+                    logger.warning("Primary evaluation error for exam=%s provider=%s error=%s, trying fallback=%s", exam.id, provider.provider_name, str(e)[:200], fb_name)
                     from app.services.providers import get_provider
                     fb = get_provider(fb_name)
+                    eval_provider = fb
                     result = await fb.evaluate_speaking(transcription, detailed=not is_free)
                 else:
                     raise ProviderUnavailableError(str(e)) from e
@@ -185,7 +191,7 @@ async def evaluate_speaking_endpoint(
             general_feedback=result.general_feedback,
             detailed_feedback=result.detailed_feedback,
             grammar_corrections=result.grammar_corrections,
-            provider_used=provider.provider_name,
+            provider_used=eval_provider.provider_name,
             ai_model_used=result.model,
             tokens_used=result.tokens,
             processing_time_ms=result.processing_time_ms,
@@ -206,7 +212,7 @@ async def evaluate_speaking_endpoint(
             general_feedback=result.general_feedback or "",
             detailed_feedback=result.detailed_feedback if is_visible else None,
             grammar_corrections=result.grammar_corrections if is_visible else [],
-            provider_used=provider.provider_name,
+            provider_used=eval_provider.provider_name,
             ai_model_used=result.model,
             tokens_used=result.tokens,
             processing_time_ms=result.processing_time_ms,
@@ -224,13 +230,16 @@ async def evaluate_speaking_endpoint(
         db.query(UserProfile).filter(UserProfile.id == user_id).update({UserProfile.last_active_at: datetime.now(timezone.utc)})
         db.commit()
 
-        logger.info("Evaluation completed exam=%s user=%s tier=%s eval_source=%s band=%s",
-                    exam.id, user_id, plan_info.get("tier"), plan_info.get("eval_source"), ev.overall_band)
+        logger.info("Evaluation completed exam=%s user=%s tier=%s eval_source=%s band=%s transcribe=%s eval=%s",
+                    exam.id, user_id, plan_info.get("tier"), plan_info.get("eval_source"), ev.overall_band,
+                    transcribe_provider.provider_name, eval_provider.provider_name)
 
         return eval_response
 
     except ProviderUnavailableError as e:
-        logger.warning("Provider unavailable: %s tier=%s eval_source=%s", e, plan_info.get("tier"), plan_info.get("eval_source"))
+        logger.warning("Provider unavailable for exam=%s tier=%s eval_source=%s primary=%s fallback=%s error=%s",
+                       exam.id, plan_info.get("tier"), plan_info.get("eval_source"),
+                       provider.provider_name, plan_info.get("fallback_provider"), str(e)[:200])
         exam.status = "pending"
         db.commit()
         raise HTTPException(
@@ -238,7 +247,9 @@ async def evaluate_speaking_endpoint(
             detail="Our AI agent is currently experiencing high demand. Please try again later.",
         )
     except Exception as e:
-        logger.exception("Evaluation failed for exam=%s user=%s tier=%s eval_source=%s", exam.id, user_id, plan_info.get("tier"), plan_info.get("eval_source"))
+        logger.exception("Evaluation failed for exam=%s user=%s tier=%s eval_source=%s provider=%s error=%s",
+                         exam.id, user_id, plan_info.get("tier"), plan_info.get("eval_source"),
+                         provider.provider_name, str(e)[:500])
         exam.status = "pending"
         exam.error_message = str(e)[:500]
         db.commit()
@@ -280,29 +291,33 @@ async def retry_speaking_evaluation(
     try:
         audio_bytes, content_type = download_audio_bytes(exam_id)
 
+        transcribe_provider = provider
         try:
             transcription = await provider.transcribe_audio(audio_bytes, f"{exam_id}.webm")
         except Exception as e:
             if _is_provider_error(e):
                 fb_name = plan_info.get("fallback_provider")
                 if fb_name:
-                    logger.info("Primary transcription failed on retry, trying fallback=%s", fb_name)
+                    logger.warning("Primary transcription failed on retry for exam=%s provider=%s error=%s, trying fallback=%s", exam.id, provider.provider_name, str(e)[:200], fb_name)
                     from app.services.providers import get_provider
                     fb = get_provider(fb_name)
+                    transcribe_provider = fb
                     transcription = await fb.transcribe_audio(audio_bytes, f"{exam_id}.webm")
                 else:
                     raise ProviderUnavailableError(str(e)) from e
             else:
                 raise
 
+        eval_provider = provider
         try:
             result = await provider.evaluate_speaking(transcription, detailed=not is_free)
         except ProviderUnavailableError:
             fb_name = plan_info.get("fallback_provider")
             if fb_name:
-                logger.info("Primary evaluation failed on retry, trying fallback=%s", fb_name)
+                logger.warning("Primary evaluation unavailable on retry for exam=%s provider=%s, trying fallback=%s", exam.id, provider.provider_name, fb_name)
                 from app.services.providers import get_provider
                 fb = get_provider(fb_name)
+                eval_provider = fb
                 result = await fb.evaluate_speaking(transcription, detailed=not is_free)
             else:
                 raise
@@ -310,9 +325,10 @@ async def retry_speaking_evaluation(
             if _is_provider_error(e):
                 fb_name = plan_info.get("fallback_provider")
                 if fb_name:
-                    logger.info("Primary evaluation error on retry, trying fallback=%s", fb_name)
+                    logger.warning("Primary evaluation error on retry for exam=%s provider=%s error=%s, trying fallback=%s", exam.id, provider.provider_name, str(e)[:200], fb_name)
                     from app.services.providers import get_provider
                     fb = get_provider(fb_name)
+                    eval_provider = fb
                     result = await fb.evaluate_speaking(transcription, detailed=not is_free)
                 else:
                     raise ProviderUnavailableError(str(e)) from e
@@ -327,7 +343,7 @@ async def retry_speaking_evaluation(
             general_feedback=result.general_feedback,
             detailed_feedback=result.detailed_feedback,
             grammar_corrections=result.grammar_corrections,
-            provider_used=provider.provider_name,
+            provider_used=eval_provider.provider_name,
             ai_model_used=result.model,
             tokens_used=result.tokens,
             processing_time_ms=result.processing_time_ms,
@@ -347,7 +363,7 @@ async def retry_speaking_evaluation(
             general_feedback=result.general_feedback or "",
             detailed_feedback=result.detailed_feedback if is_visible else None,
             grammar_corrections=result.grammar_corrections if is_visible else [],
-            provider_used=provider.provider_name,
+            provider_used=eval_provider.provider_name,
             ai_model_used=result.model,
             tokens_used=result.tokens,
             processing_time_ms=result.processing_time_ms,
@@ -364,13 +380,16 @@ async def retry_speaking_evaluation(
         db.query(UserProfile).filter(UserProfile.id == user_id).update({UserProfile.last_active_at: datetime.now(timezone.utc)})
         db.commit()
 
-        logger.info("Retry evaluation completed exam=%s user=%s tier=%s band=%s",
-                    exam.id, user_id, plan_info.get("tier"), ev.overall_band)
+        logger.info("Retry evaluation completed exam=%s user=%s tier=%s band=%s transcribe=%s eval=%s",
+                    exam.id, user_id, plan_info.get("tier"), ev.overall_band,
+                    transcribe_provider.provider_name, eval_provider.provider_name)
 
         return eval_response
 
     except ProviderUnavailableError as e:
-        logger.warning("Provider unavailable on retry: %s tier=%s", e, plan_info.get("tier"))
+        logger.warning("Provider unavailable on retry for exam=%s tier=%s primary=%s fallback=%s error=%s",
+                       exam.id, plan_info.get("tier"),
+                       provider.provider_name, plan_info.get("fallback_provider"), str(e)[:200])
         exam.status = "pending"
         db.commit()
         raise HTTPException(
@@ -382,7 +401,8 @@ async def retry_speaking_evaluation(
         db.commit()
         raise HTTPException(status_code=404, detail="Audio no longer available for this exam.")
     except Exception as e:
-        logger.exception("Retry evaluation failed for exam=%s user=%s", exam.id, user_id)
+        logger.exception("Retry evaluation failed for exam=%s user=%s provider=%s error=%s",
+                         exam.id, user_id, provider.provider_name, str(e)[:500])
         exam.status = "pending"
         exam.error_message = str(e)[:500]
         db.commit()

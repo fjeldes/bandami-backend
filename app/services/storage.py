@@ -23,6 +23,14 @@ def upload_audio_bytes(exam_id: str, audio_bytes: bytes, content_type: str = "au
     return blob.name
 
 
+def download_audio_bytes(exam_id: str) -> tuple[bytes, str]:
+    """Download audio bytes from GCS. Used for re-analysis retry."""
+    blob = _get_bucket().blob(f"audio/{exam_id}.webm")
+    if not blob.exists():
+        raise FileNotFoundError(f"Audio not found: {exam_id}")
+    return blob.download_as_bytes(), "audio/webm"
+
+
 def delete_audio(exam_id: str):
     """Hard-delete an audio file. Used in account deletion flow."""
     blob = _get_bucket().blob(f"audio/{exam_id}.webm")

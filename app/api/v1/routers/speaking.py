@@ -12,7 +12,7 @@ from app.core.auth import (
     get_ai_provider,
     compute_feedback_unlocks_at,
 )
-from app.services.storage import upload_audio_bytes
+from app.services.storage import upload_audio_bytes, download_audio_bytes
 
 import logging
 logger = logging.getLogger("ielts.speaking")
@@ -243,6 +243,150 @@ async def evaluate_speaking_endpoint(
         exam.error_message = str(e)[:500]
         db.commit()
         raise HTTPException(status_code=503, detail="Our AI agent is currently experiencing high demand. Please try again later.")
+
+
+@router.post("/{exam_id}/retry", response_model=EvaluationResponse)
+async def retry_speaking_evaluation(
+    exam_id: str,
+    user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    plan_info: dict = Depends(check_daily_limit),
+    provider: SpeakingEvaluator = Depends(get_ai_provider),
+):
+    """Retry evaluation using previously saved audio from GCS (no re-recording needed)."""
+    exam = db.query(Exam).filter(
+        Exam.id == exam_id,
+        Exam.user_id == user_id,
+    ).first()
+
+    if not exam:
+        raise HTTPException(status_code=404, detail="Exam not found")
+    if exam.status not in ("pending", "failed"):
+        raise HTTPException(status_code=400, detail="Exam already processed")
+
+    db.query(Evaluation).filter(Evaluation.exam_id == exam.id).delete()
+    exam.status = "pending"
+    db.commit()
+
+    is_free = plan_info.get("tier", "free") != "premium"
+    delay_hours = plan_info.get("feedback_delay_hours", 0)
+    unlocks_at = compute_feedback_unlocks_at(delay_hours)
+    is_visible = plan_info.get("tier", "free") == "premium" or plan_info.get("is_admin", False)
+
+    exam.status = "processing"
+    exam.eval_source = plan_info.get("eval_source", "free")
+    db.commit()
+
+    try:
+        audio_bytes, content_type = download_audio_bytes(exam_id)
+
+        try:
+            transcription = await provider.transcribe_audio(audio_bytes, f"{exam_id}.webm")
+        except Exception as e:
+            if _is_provider_error(e):
+                fb_name = plan_info.get("fallback_provider")
+                if fb_name:
+                    logger.info("Primary transcription failed on retry, trying fallback=%s", fb_name)
+                    from app.services.providers import get_provider
+                    fb = get_provider(fb_name)
+                    transcription = await fb.transcribe_audio(audio_bytes, f"{exam_id}.webm")
+                else:
+                    raise ProviderUnavailableError(str(e)) from e
+            else:
+                raise
+
+        try:
+            result = await provider.evaluate_speaking(transcription, detailed=not is_free)
+        except ProviderUnavailableError:
+            fb_name = plan_info.get("fallback_provider")
+            if fb_name:
+                logger.info("Primary evaluation failed on retry, trying fallback=%s", fb_name)
+                from app.services.providers import get_provider
+                fb = get_provider(fb_name)
+                result = await fb.evaluate_speaking(transcription, detailed=not is_free)
+            else:
+                raise
+        except Exception as e:
+            if _is_provider_error(e):
+                fb_name = plan_info.get("fallback_provider")
+                if fb_name:
+                    logger.info("Primary evaluation error on retry, trying fallback=%s", fb_name)
+                    from app.services.providers import get_provider
+                    fb = get_provider(fb_name)
+                    result = await fb.evaluate_speaking(transcription, detailed=not is_free)
+                else:
+                    raise ProviderUnavailableError(str(e)) from e
+            else:
+                raise
+
+        ev = Evaluation(
+            exam_id=exam.id,
+            user_submission=transcription,
+            overall_band=result.overall_band,
+            criteria_scores=result.criteria_scores,
+            general_feedback=result.general_feedback,
+            detailed_feedback=result.detailed_feedback,
+            grammar_corrections=result.grammar_corrections,
+            provider_used=provider.provider_name,
+            ai_model_used=result.model,
+            tokens_used=result.tokens,
+            processing_time_ms=result.processing_time_ms,
+            feedback_unlocks_at=unlocks_at,
+        )
+        db.add(ev)
+
+        exam.status = "completed"
+        exam.completed_at = datetime.now(timezone.utc)
+
+        eval_response = EvaluationResponse(
+            id=str(ev.id),
+            exam_id=str(ev.exam_id),
+            user_submission=transcription,
+            overall_band=ev.overall_band,
+            criteria_scores=_filter_speaking_criteria(ev.criteria_scores, is_visible),
+            general_feedback=result.general_feedback or "",
+            detailed_feedback=result.detailed_feedback if is_visible else None,
+            grammar_corrections=result.grammar_corrections if is_visible else [],
+            provider_used=provider.provider_name,
+            ai_model_used=result.model,
+            tokens_used=result.tokens,
+            processing_time_ms=result.processing_time_ms,
+            feedback_unlocks_at=unlocks_at,
+            is_feedback_visible=is_visible,
+            created_at=ev.created_at,
+            exam_status=exam.status,
+        )
+
+        db.commit()
+        db.refresh(ev)
+
+        from app.models.user import UserProfile
+        db.query(UserProfile).filter(UserProfile.id == user_id).update({UserProfile.last_active_at: datetime.now(timezone.utc)})
+        db.commit()
+
+        logger.info("Retry evaluation completed exam=%s user=%s tier=%s band=%s",
+                    exam.id, user_id, plan_info.get("tier"), ev.overall_band)
+
+        return eval_response
+
+    except ProviderUnavailableError as e:
+        logger.warning("Provider unavailable on retry: %s tier=%s", e, plan_info.get("tier"))
+        exam.status = "pending"
+        db.commit()
+        raise HTTPException(
+            status_code=503,
+            detail="Our AI agent is currently experiencing high demand. Please try again later.",
+        )
+    except FileNotFoundError:
+        exam.status = "pending"
+        db.commit()
+        raise HTTPException(status_code=404, detail="Audio no longer available for this exam.")
+    except Exception as e:
+        logger.exception("Retry evaluation failed for exam=%s user=%s", exam.id, user_id)
+        exam.status = "pending"
+        exam.error_message = str(e)[:500]
+        db.commit()
+        raise HTTPException(status_code=503, detail="Evaluation failed. Please try again later.")
 
 
 @router.get("/{exam_id}/evaluation", response_model=EvaluationResponse)

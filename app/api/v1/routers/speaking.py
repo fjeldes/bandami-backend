@@ -198,6 +198,7 @@ async def evaluate_speaking_endpoint(
             feedback_unlocks_at=unlocks_at,
         )
         db.add(ev)
+        db.flush()  # populate id, created_at before building Response
 
         exam.status = "completed"
         exam.completed_at = datetime.now(timezone.utc)
@@ -223,7 +224,6 @@ async def evaluate_speaking_endpoint(
         )
 
         db.commit()
-        db.refresh(ev)
 
         # Update last_active_at
         from app.models.user import UserProfile
@@ -350,6 +350,7 @@ async def retry_speaking_evaluation(
             feedback_unlocks_at=unlocks_at,
         )
         db.add(ev)
+        db.flush()  # populate id, created_at before building Response
 
         exam.status = "completed"
         exam.completed_at = datetime.now(timezone.utc)
@@ -374,7 +375,6 @@ async def retry_speaking_evaluation(
         )
 
         db.commit()
-        db.refresh(ev)
 
         from app.models.user import UserProfile
         db.query(UserProfile).filter(UserProfile.id == user_id).update({UserProfile.last_active_at: datetime.now(timezone.utc)})

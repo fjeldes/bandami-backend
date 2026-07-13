@@ -31,7 +31,8 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 @app.on_event("startup")
 async def recover_stale_exams():
-    """Reset exams stuck in 'processing' for more than 30 minutes back to 'failed'."""
+    """Reset exams stuck in 'processing' > 30 min to 'failed',
+       and delete orphaned 'pending' exams > 2h with no evaluation."""
     from app.db.engine import engine
     try:
         with engine.connect() as conn:
@@ -41,9 +42,17 @@ async def recover_stale_exams():
             recovered = result.rowcount
             if recovered:
                 logger.info("Recovered %d stale 'processing' exams to 'failed'", recovered)
+
+            result = conn.execute(
+                text("DELETE FROM exams WHERE status = 'pending' AND created_at < NOW() - INTERVAL '2 hours' AND id NOT IN (SELECT exam_id FROM evaluations)")
+            )
+            cleaned = result.rowcount
+            if cleaned:
+                logger.info("Cleaned up %d orphaned 'pending' exams", cleaned)
+
             conn.commit()
     except Exception as e:
-        logger.error("Failed to recover stale exams: %s", e)
+        logger.error("Failed to recover/cleanup stale exams: %s", e)
 
 
 @app.middleware("http")

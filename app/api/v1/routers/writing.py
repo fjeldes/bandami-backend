@@ -44,6 +44,29 @@ async def create_writing_exam(
     user_id: str = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    existing = db.query(Exam).filter(
+        Exam.user_id == user_id,
+        Exam.exam_type == "writing",
+        Exam.status == "pending",
+    ).first()
+
+    if existing:
+        if body.question_id and str(existing.question_id) != str(body.question_id):
+            existing.question_id = body.question_id
+            existing.task_type = body.task_type or existing.task_type
+            db.commit()
+        return ExamResponse(
+            id=str(existing.id),
+            user_id=str(existing.user_id),
+            question_id=str(existing.question_id) if existing.question_id else None,
+            exam_type=existing.exam_type,
+            task_type=existing.task_type,
+            status=existing.status,
+            attempt_number=existing.attempt_number,
+            eval_source=existing.eval_source,
+            created_at=existing.created_at,
+        )
+
     exam = Exam(
         user_id=user_id,
         question_id=str(body.question_id) if body.question_id else None,

@@ -113,6 +113,27 @@ async def readiness_check():
         return JSONResponse(status_code=503, content={"status": "not ready", "database": "unavailable"})
 
 
+@app.get("/api/cron/cleanup-orphaned-exams")
+async def cleanup_orphaned_exams():
+    """Delete pending exams > 2h old with no associated evaluation."""
+    from app.db.engine import engine
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(
+                text("DELETE FROM exams WHERE status = 'pending' "
+                     "AND created_at < NOW() - INTERVAL '2 hours' "
+                     "AND id NOT IN (SELECT exam_id FROM evaluations)")
+            )
+            cleaned = result.rowcount
+            conn.commit()
+            if cleaned:
+                logger.info("Cron cleaned up %d orphaned exams", cleaned)
+            return {"cleaned": cleaned}
+    except Exception as e:
+        logger.error("Cron cleanup failed: %s", e)
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 # ---- Legal ----
 
 @app.get("/legal/terms", response_class=HTMLResponse, include_in_schema=False)

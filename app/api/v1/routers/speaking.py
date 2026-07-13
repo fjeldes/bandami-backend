@@ -53,6 +53,9 @@ async def create_speaking_exam(
     ).first()
 
     if existing:
+        if body.question_id and str(existing.question_id) != str(body.question_id):
+            existing.question_id = body.question_id
+            db.commit()
         return ExamResponse(
             id=str(existing.id),
             user_id=str(existing.user_id),

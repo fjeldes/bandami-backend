@@ -273,6 +273,7 @@ async def refresh(
 async def verify_email(
     body: VerifyEmailRequest = Body(...),
     db: Session = Depends(get_db),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
 ):
     try:
         user_id = decode_verification_token(body.token)
@@ -286,6 +287,8 @@ async def verify_email(
     user.email_confirmed_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(user)
+
+    background_tasks.add_task(send_welcome_email, user.email, user.full_name or "")
 
     access_token = create_access_token(user_id)
     refresh_token = create_refresh_token(user_id)
@@ -411,6 +414,7 @@ async def google_callback(
     state: str | None = None,
     request: Request = None,
     db: Session = Depends(get_db),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
 ):
     settings = get_settings()
 
@@ -471,6 +475,8 @@ async def google_callback(
             subscription_tier="free",
         ))
         db.commit()
+
+        background_tasks.add_task(send_welcome_email, email, full_name or "")
 
         for consent_type, doc_id in [("tos", "tos_v1"), ("ai_processing", "ai_processing_v1")]:
             db.add(UserConsent(

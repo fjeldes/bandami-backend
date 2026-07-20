@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     polar_webhook_secret: str = ""
     polar_environment: str = "sandbox"
     polar_product_premium: str = ""
+    polar_product_weekly_pass: str = ""
 
     groq_api_key: str = ""
 

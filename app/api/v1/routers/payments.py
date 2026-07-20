@@ -250,7 +250,7 @@ async def verify_checkout_session(
         db.commit()
 
     plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.slug == plan_slug).first()
-    if not plan or plan_slug not in ("premium", "exam_week_pass"):
+    if not plan or plan_slug not in ("premium", "exam_week_pass", "weekly_pro_pass"):
         return {"status": "skipped"}
 
     now = datetime.now(timezone.utc)
@@ -354,7 +354,7 @@ async def switch_plan(
 ):
     provider = _get_provider()
     new_plan_slug = body.get("plan_slug")
-    if new_plan_slug not in ("premium", "exam_week_pass"):
+    if new_plan_slug not in ("premium", "exam_week_pass", "weekly_pro_pass"):
         raise HTTPException(status_code=400, detail="Invalid plan.")
 
     user = db.query(UserProfile).filter(UserProfile.id == user_id).first()

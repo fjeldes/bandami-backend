@@ -72,6 +72,8 @@ class PolarProvider(PaymentProvider):
         s = get_settings()
         if plan_slug == "premium":
             pid = s.polar_product_premium
+        elif plan_slug == "weekly_pro_pass":
+            pid = s.polar_product_weekly_pass
         else:
             pid = ""
         if not pid:
@@ -139,8 +141,7 @@ class PolarProvider(PaymentProvider):
         logger.info("Polar webhook type=%s id=%s", event_type, sub_id)
 
         if event_type in ("checkout.created", "checkout.updated"):
-            logger.info("Polar checkout event id=%s", sub_id)
-            return {"status": "ok"}
+            return self._handle_checkout(data, db, UserProfile, UserSubscription, SubscriptionPlan)
 
         if event_type == "subscription.created":
             return self._handle_subscription_created(data, db, UserProfile, UserSubscription, SubscriptionPlan)
@@ -156,7 +157,87 @@ class PolarProvider(PaymentProvider):
 
         return {"status": "unhandled_event", "type": event_type}
 
-    # -- subscription_created handler -----------------------------------------
+    # -- checkout handler (one-time products like weekly pass) -----------------
+
+    def _handle_checkout(
+        self, data: dict, db: DbSession,
+        UserProfile, UserSubscription, SubscriptionPlan,
+    ) -> dict:
+        checkout_id = data.get("id", "")
+        status = data.get("status", "")
+        metadata = data.get("metadata", {})
+        plan_slug = metadata.get("plan_slug", "")
+
+        if status not in ("succeeded", "paid"):
+            logger.info("Polar checkout not completed id=%s status=%s", checkout_id, status)
+            return {"status": "skipped", "reason": "not_completed"}
+
+        if plan_slug != "weekly_pro_pass":
+            return {"status": "ok"}
+
+        if db.query(UserSubscription).filter(
+            UserSubscription.stripe_session_id == checkout_id,
+        ).first():
+            logger.info("Weekly pass already provisioned checkout=%s", checkout_id)
+            return {"status": "already_processed"}
+
+        user_id = metadata.get("user_id", "")
+        customer = data.get("customer", {})
+        user_email = customer.get("email", "")
+
+        user = None
+        if user_id:
+            user = db.query(UserProfile).filter(UserProfile.id == user_id).first()
+        if not user and user_email:
+            user = db.query(UserProfile).filter(UserProfile.email == user_email).first()
+        if not user:
+            logger.warning("User not found for weekly pass checkout=%s", checkout_id)
+            return {"status": "skipped", "reason": "user_not_found"}
+
+        plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.slug == "weekly_pro_pass").first()
+        if not plan:
+            logger.error("Weekly pro pass plan not found in DB")
+            return {"status": "skipped", "reason": "plan_not_found"}
+
+        now = datetime.now(timezone.utc)
+        period_end = now + timedelta(days=7)
+
+        new_sub = UserSubscription(
+            id=str(uuid4()), user_id=str(user.id), plan_id=str(plan.id),
+            status="active", current_period_start=now, current_period_end=period_end,
+            stripe_subscription_id=checkout_id, stripe_session_id=checkout_id,
+        )
+        db.add(new_sub)
+
+        update = {"subscription_tier": "premium"}
+        if not user.upgraded_at:
+            update["upgraded_at"] = now
+        db.query(UserProfile).filter(UserProfile.id == str(user.id)).update(update)
+        db.flush()
+
+        amount_raw = data.get("amount", 0)
+        total_cents = int(amount_raw) if amount_raw else 0
+        if total_cents > 0:
+            from app.models.subscription import UserPayment
+            db.add(UserPayment(
+                user_id=str(user.id), subscription_id=new_sub.id,
+                amount_clp=total_cents, currency="USD",
+                flow_order=checkout_id, flow_invoice_id=f"polar_{checkout_id}",
+                period_start=now, period_end=period_end,
+                payment_type="first_charge",
+            ))
+
+        send_purchase_confirmation(
+            to_email=user.email,
+            name=user.full_name or "there",
+            plan_name="Weekly Pro Pass",
+            amount=f"${total_cents / 100:.2f}",
+            period=f"Access until: {period_end.strftime('%B %d, %Y')}",
+        )
+
+        db.commit()
+        logger.info("Weekly pass provisioned user=%s checkout=%s", user.id, checkout_id)
+        return {"status": "ok", "subscription_id": new_sub.id}
 
     def _handle_subscription_created(
         self, data: dict, db: DbSession,

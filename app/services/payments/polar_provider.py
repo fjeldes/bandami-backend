@@ -246,6 +246,10 @@ class PolarProvider(PaymentProvider):
         sub_id = data.get("id", "")
         customer = data.get("customer", {})
         user_email = customer.get("email", "")
+        product = data.get("product", {})
+        product_id = product.get("id", "") if isinstance(product, dict) else ""
+        s = get_settings()
+        is_weekly = product_id == s.polar_product_weekly_pass
 
         if not sub_id or not user_email:
             return {"status": "skipped", "reason": "missing_id_or_email"}
@@ -261,15 +265,17 @@ class PolarProvider(PaymentProvider):
             logger.warning("User not found email=%s", user_email)
             return {"status": "skipped", "reason": "user_not_found"}
 
-        plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.slug == "premium").first()
+        plan_slug = "weekly_pro_pass" if is_weekly else "premium"
+        plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.slug == plan_slug).first()
         if not plan:
-            return {"status": "skipped", "reason": "premium_plan_not_found"}
+            return {"status": "skipped", "reason": f"{plan_slug}_plan_not_found"}
 
         now = datetime.now(timezone.utc)
+        days = 7 if is_weekly else 30
         raw_status = data.get("status", "active")
         status = raw_status if raw_status != "trialing" else "trialing"
 
-        current_period_end = now + timedelta(days=30)
+        current_period_end = now + timedelta(days=days)
         current_period_end_raw = data.get("current_period_end")
         if current_period_end_raw:
             try:
@@ -305,15 +311,31 @@ class PolarProvider(PaymentProvider):
                 payment_type="first_charge",
             ))
 
-        if total_cents == 0 or status == "trialing":
+        if status == "trialing":
             send_trial_welcome_email(
                 to_email=user.email,
                 name=user.full_name or "there",
+                trial_days=days,
+                plan_name=plan.name,
+            )
+        elif total_cents > 0:
+            send_purchase_confirmation(
+                to_email=user.email,
+                name=user.full_name or "there",
+                plan_name=plan.name,
+                amount=f"${total_cents / 100:.2f}",
+                period=f"Access until: {current_period_end.strftime('%B %d, %Y')}" if current_period_end else "",
+            )
+        else:
+            send_trial_welcome_email(
+                to_email=user.email,
+                name=user.full_name or "there",
+                trial_days=days,
+                plan_name=plan.name,
             )
 
-        logger.info("Polar subscription created user=%s sub=%s amount=%s",
-                    user.id, sub_id, total_cents)
         db.commit()
+        logger.info("Polar subscription created sub=%s user=%s plan=%s product=%s weekly=%s", sub_id, user.id, plan_slug, product_id, is_weekly)
         return {"status": "ok"}
 
     # -- subscription_updated handler -----------------------------------------
@@ -468,7 +490,7 @@ class PolarProvider(PaymentProvider):
             return SubscriptionInfo(has_subscription=False)
 
         plan = sub.plan
-        is_one_time = not sub.stripe_subscription_id
+        is_one_time = plan.interval == "one_time" if plan else not sub.stripe_subscription_id
 
         card_last4 = None
         card_brand = None

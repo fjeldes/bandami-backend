@@ -101,3 +101,38 @@ class TestUserManagement:
             "role": "admin",
         }, headers=admin_headers)
         assert res.status_code == 404
+
+    def test_admin_users_list_includes_plan_fields(self, client, admin_headers):
+        res = client.get("/api/v1/admin/users", headers=admin_headers)
+        assert res.status_code == 200
+        users = res.json()["users"]
+        assert len(users) > 0
+        for u in users:
+            assert "plan_slug" in u
+            assert "plan_name" in u
+            assert "plan_interval" in u
+
+    def test_admin_users_filter_by_plan_slug(self, client, admin_headers):
+        res = client.get("/api/v1/admin/users?plan_slug=weekly_pro_pass", headers=admin_headers)
+        assert res.status_code == 200
+        data = res.json()
+        for u in data["users"]:
+            assert u["plan_slug"] in (None, "weekly_pro_pass")
+
+    def test_admin_stats_includes_plan_counts(self, client, admin_headers):
+        res = client.get("/api/v1/admin/stats", headers=admin_headers)
+        assert res.status_code == 200
+        data = res.json()
+        assert "premium_monthly_count" in data
+        assert "premium_weekly_count" in data
+        assert isinstance(data["premium_monthly_count"], int)
+        assert isinstance(data["premium_weekly_count"], int)
+
+    def test_admin_analytics_plan_breakdown(self, client, admin_headers):
+        res = client.get("/api/v1/admin/analytics", headers=admin_headers)
+        assert res.status_code == 200
+        data = res.json()
+        summary = data["summary"]
+        for key in ["premium_monthly", "premium_weekly", "active_premium_monthly", "active_premium_weekly"]:
+            assert key in summary
+            assert isinstance(summary[key], int)

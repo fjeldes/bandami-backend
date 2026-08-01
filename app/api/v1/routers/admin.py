@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File
 from pydantic import BaseModel
 from typing import Optional
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import select, func, desc, or_, text
 
 from app.db.deps import get_db
@@ -77,10 +77,25 @@ async def admin_stats(db: Session = Depends(get_db)):
     now = datetime.now(timezone.utc)
     users_this_month = sum(1 for u in users if u.created_at and u.created_at.month == now.month)
 
+    premium_monthly = db.scalar(text(
+        "SELECT COUNT(*) FROM user_profiles up "
+        "JOIN user_subscriptions us ON us.user_id = up.id AND us.status = 'active' "
+        "JOIN subscription_plans sp ON sp.id = us.plan_id "
+        "WHERE sp.slug = 'premium'"
+    )) or 0
+    premium_weekly = db.scalar(text(
+        "SELECT COUNT(*) FROM user_profiles up "
+        "JOIN user_subscriptions us ON us.user_id = up.id AND us.status = 'active' "
+        "JOIN subscription_plans sp ON sp.id = us.plan_id "
+        "WHERE sp.slug = 'weekly_pro_pass'"
+    )) or 0
+
     return {
         "total_users": total_users,
         "admin_count": admin_count,
         "premium_count": premium_count,
+        "premium_monthly_count": premium_monthly,
+        "premium_weekly_count": premium_weekly,
         "active_subscriptions": subs,
         "total_exams": total_exams,
         "completed_exams": completed_exams,
@@ -97,6 +112,7 @@ async def list_users(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     search: str = Query(""),
+    plan_slug: Optional[str] = Query(None, description="Filter by plan slug: premium, weekly_pro_pass"),
     db: Session = Depends(get_db),
 ):
     query = db.query(UserProfile)
@@ -107,12 +123,30 @@ async def list_users(
             UserProfile.full_name.ilike(pattern),
         ))
 
+    if plan_slug:
+        query = query.join(UserProfile.subscriptions).filter(
+            UserSubscription.status == "active"
+        ).join(UserSubscription.plan).filter(
+            SubscriptionPlan.slug == plan_slug
+        )
+
     total = query.count()
     offset = (page - 1) * limit
     users = query.order_by(desc(UserProfile.created_at)).offset(offset).limit(limit).all()
 
+    user_ids = [u.id for u in users]
+    active_subs_by_user = {}
+    if user_ids:
+        active_subs = db.query(UserSubscription).options(
+            joinedload(UserSubscription.plan)
+        ).filter(
+            UserSubscription.user_id.in_(user_ids),
+            UserSubscription.status == "active",
+        ).all()
+        active_subs_by_user = {s.user_id: s for s in active_subs}
+
     return {
-        "users": [_serialize_user(u) for u in users],
+        "users": [_serialize_user(u, active_subs_by_user.get(u.id)) for u in users],
         "total": total,
         "page": page,
         "limit": limit,
@@ -129,11 +163,13 @@ async def get_user_detail(
         raise HTTPException(status_code=404, detail="User not found")
 
     exams = db.query(Exam).filter(Exam.user_id == user_id).order_by(desc(Exam.created_at)).limit(20).all()
-    subs = db.query(UserSubscription).filter(UserSubscription.user_id == user_id).order_by(desc(UserSubscription.created_at)).limit(5).all()
+    subs = db.query(UserSubscription).options(joinedload(UserSubscription.plan)).filter(UserSubscription.user_id == user_id).order_by(desc(UserSubscription.created_at)).limit(5).all()
     packs = db.query(UserCreditPack).filter(UserCreditPack.user_id == user_id).all()
 
+    active_sub = next((s for s in subs if s.status == "active"), None)
+
     return {
-        "user": _serialize_user(user),
+        "user": _serialize_user(user, active_sub),
         "exams": [_serialize_exam(e) for e in exams],
         "subscriptions": [_serialize_sub(s) for s in subs],
         "credit_packs": [_serialize_pack(p) for p in packs],
@@ -321,10 +357,16 @@ async def list_exams(
 
 # ---- Serializers ----
 
-def _serialize_user(u: UserProfile) -> dict:
+def _serialize_user(u: UserProfile, active_sub: Optional[UserSubscription] = None) -> dict:
+    plan_slug = active_sub.plan.slug if active_sub and active_sub.plan else None
+    plan_name = active_sub.plan.name if active_sub and active_sub.plan else None
+    plan_interval = active_sub.plan.interval if active_sub and active_sub.plan else None
     return {
         "id": str(u.id), "email": u.email, "full_name": u.full_name,
         "subscription_tier": u.subscription_tier, "role": u.role,
+        "plan_slug": plan_slug,
+        "plan_name": plan_name,
+        "plan_interval": plan_interval,
         "created_at": u.created_at.isoformat() if u.created_at else None,
     }
 
@@ -356,6 +398,8 @@ def _serialize_exam_with_user(e: Exam) -> dict:
 def _serialize_sub(s: UserSubscription) -> dict:
     return {
         "id": str(s.id), "user_id": str(s.user_id), "plan_id": str(s.plan_id),
+        "plan_slug": s.plan.slug if s.plan else None,
+        "plan_name": s.plan.name if s.plan else None,
         "status": s.status,
         "current_period_start": s.current_period_start.isoformat() if s.current_period_start else None,
         "current_period_end": s.current_period_end.isoformat() if s.current_period_end else None,
@@ -477,14 +521,43 @@ async def admin_analytics(db: Session = Depends(get_db)):
         "SELECT COUNT(*) FROM exams e JOIN user_profiles up ON up.id = e.user_id WHERE e.created_at >= :month_start AND e.status = 'completed' AND up.subscription_tier = 'premium'"
     ), {"month_start": month_start}) or 0
 
+    premium_monthly = db.scalar(text(
+        "SELECT COUNT(*) FROM user_profiles up "
+        "JOIN user_subscriptions us ON us.user_id = up.id AND us.status = 'active' "
+        "JOIN subscription_plans sp ON sp.id = us.plan_id "
+        "WHERE sp.slug = 'premium'"
+    )) or 0
+    premium_weekly = db.scalar(text(
+        "SELECT COUNT(*) FROM user_profiles up "
+        "JOIN user_subscriptions us ON us.user_id = up.id AND us.status = 'active' "
+        "JOIN subscription_plans sp ON sp.id = us.plan_id "
+        "WHERE sp.slug = 'weekly_pro_pass'"
+    )) or 0
+    active_premium_monthly = db.scalar(text(
+        "SELECT COUNT(*) FROM user_profiles up "
+        "JOIN user_subscriptions us ON us.user_id = up.id AND us.status = 'active' "
+        "JOIN subscription_plans sp ON sp.id = us.plan_id "
+        "WHERE sp.slug = 'premium' AND up.last_active_at >= :month_start"
+    ), {"month_start": month_start}) or 0
+    active_premium_weekly = db.scalar(text(
+        "SELECT COUNT(*) FROM user_profiles up "
+        "JOIN user_subscriptions us ON us.user_id = up.id AND us.status = 'active' "
+        "JOIN subscription_plans sp ON sp.id = us.plan_id "
+        "WHERE sp.slug = 'weekly_pro_pass' AND up.last_active_at >= :month_start"
+    ), {"month_start": month_start}) or 0
+
     return {
         "summary": {
             "total_users": total_users,
             "free_users": free,
             "premium_users": premium,
+            "premium_monthly": premium_monthly,
+            "premium_weekly": premium_weekly,
             "active_this_month": active_this_month,
             "active_free": active_free,
             "active_premium": active_premium,
+            "active_premium_monthly": active_premium_monthly,
+            "active_premium_weekly": active_premium_weekly,
             "conversions_total": conversions_total,
             "conversions_this_month": conversions_this_month,
             "monthly_evals_free": monthly_evals_free,

@@ -136,6 +136,8 @@ def db_session(test_engine):
                          provider="gemini", feedback_delay_hours=24, sort_order=1, price_cents=0, interval="month"),
         SubscriptionPlan(id=str(uuid.uuid4()), slug="premium", name="Premium", daily_eval_limit=30,
                          provider="openai", feedback_delay_hours=0, sort_order=10, price_cents=1499, interval="month"),
+        SubscriptionPlan(id=str(uuid.uuid4()), slug="weekly_pro_pass", name="Weekly Pro Pass", daily_eval_limit=30,
+                         provider="openai", feedback_delay_hours=0, sort_order=5, price_cents=499, interval="week"),
     ]:
         db.add(plan)
     db.commit()

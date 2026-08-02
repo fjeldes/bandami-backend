@@ -32,7 +32,8 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 @app.on_event("startup")
 async def recover_stale_exams():
     """Reset exams stuck in 'processing' > 30 min to 'failed',
-       and delete orphaned 'pending' exams > 2h with no evaluation."""
+       delete orphaned 'pending' exams > 2h,
+       and revert expired subscription tiers."""
     from app.db.engine import engine
     try:
         with engine.connect() as conn:
@@ -49,6 +50,18 @@ async def recover_stale_exams():
             cleaned = result.rowcount
             if cleaned:
                 logger.info("Cleaned up %d orphaned 'pending' exams", cleaned)
+
+            result = conn.execute(
+                text("UPDATE user_profiles SET subscription_tier = 'free' "
+                     "WHERE subscription_tier = 'premium' "
+                     "AND id NOT IN ("
+                     "  SELECT user_id FROM user_subscriptions "
+                     "  WHERE status IN ('active', 'trialing') "
+                     "    AND current_period_end > NOW()"
+                     ")")
+            )
+            if result.rowcount:
+                logger.info("Reverted %d expired premium tiers to free", result.rowcount)
 
             conn.commit()
     except Exception as e:

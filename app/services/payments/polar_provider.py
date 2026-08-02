@@ -358,6 +358,11 @@ class PolarProvider(PaymentProvider):
         raw_status = data.get("status")
         if raw_status and sub.status != "cancel_at_period_end":
             sub.status = raw_status
+            if raw_status in ("past_due", "canceled", "unpaid"):
+                db.query(UserProfile).filter(
+                    UserProfile.id == sub.user_id
+                ).update({"subscription_tier": "free"})
+                logger.info("Polar subscription %s — reverted tier to free for user=%s", raw_status, sub.user_id)
 
         period_end = data.get("current_period_end")
         if period_end:

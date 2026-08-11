@@ -236,13 +236,30 @@ async def create_question(
     body: QuestionCreate,
     db: Session = Depends(get_db),
 ):
+    module = body.module
+    if body.exam_type == "speaking":
+        if module not in ("part1", "part2", "part3"):
+            module = "part1"
+    elif body.exam_type == "writing":
+        if module not in ("general", "academic"):
+            module = "general"
+    else:
+        module = module or "general"
+    
+    task_type = body.task_type
+    if body.exam_type == "speaking":
+        task_type = None
+    elif body.exam_type == "writing":
+        if task_type not in ("task1", "task2"):
+            task_type = "task1"
+    
     q = Question(
         exam_type=body.exam_type,
-        task_type=body.task_type,
+        task_type=task_type,
         difficulty=body.difficulty,
         prompt_text=body.prompt_text,
         title=body.title,
-        module=body.module or "general",
+        module=module,
         img_url=body.img_url,
         img_info=body.img_info,
     )

@@ -15,6 +15,20 @@ logger = logging.getLogger("ielts.reading")
 router = APIRouter()
 
 
+def _get_user_friendly_error(e: Exception, exam_id: str) -> tuple[int, str]:
+    msg = str(e).lower()
+    if "rate_limit" in msg or "429" in msg or "tpm" in msg or "rpm" in msg:
+        return 503, "AI service is temporarily busy due to high demand. Please wait a moment and try again."
+    if "too large" in msg or "413" in msg or "token" in msg or "length" in msg:
+        return 413, "Your response is too long for the AI to process. Please try with a shorter answer."
+    if "model" in msg and ("not found" in msg or "does not exist" in msg or "access" in msg):
+        return 503, "AI service is currently unavailable. Please try again in a few minutes."
+    if "timeout" in msg or "deadline" in msg or "connection" in msg:
+        return 503, "AI service is taking too long to respond. Please try again."
+    logger.exception("Evaluation failed for exam=%s error=%s", exam_id, str(e)[:500])
+    return 500, "Evaluation failed. Please try again."
+
+
 class ReadingSubmission(BaseModel):
     exam_id: str
     answers: dict = Field(default_factory=dict)
@@ -117,10 +131,10 @@ async def evaluate_reading(
         )
 
     except Exception as e:
-        logger.exception("Evaluation failed for exam=%s user=%s tier=%s eval_source=%s", exam.id, user_id, plan_info.get("tier"), plan_info.get("eval_source"))
         exam.status = "failed"
         db.commit()
-        raise HTTPException(status_code=500, detail="Evaluation failed. Please try again.")
+        status_code, detail = _get_user_friendly_error(e, str(exam.id))
+        raise HTTPException(status_code=status_code, detail=detail)
 
 
 @router.get("/{exam_id}/evaluation", response_model=EvaluationResponse)

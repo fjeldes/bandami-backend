@@ -1,7 +1,7 @@
 """
 Groq Provider — Free-tier fallback (30 req/min, 1000 req/day).
 LPU-accelerated inference, OpenAI-compatible API.
-Model: openai/gpt-oss-120b
+Model: openai/gpt-oss-20b
 """
 import json
 import time
@@ -23,7 +23,7 @@ logger = logging.getLogger("ielts.groq")
 
 
 class GroqProvider(OpenAIProvider):
-    MODEL = "openai/gpt-oss-120b"
+    MODEL = "openai/gpt-oss-20b"
 
     def _get_client(self):
         if self._client is None:

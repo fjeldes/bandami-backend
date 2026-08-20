@@ -24,6 +24,20 @@ from datetime import datetime, timezone
 router = APIRouter()
 
 
+def _get_user_friendly_error(e: Exception, exam_id: str) -> tuple[int, str]:
+    msg = str(e).lower()
+    if "rate_limit" in msg or "429" in msg or "tpm" in msg or "rpm" in msg:
+        return 503, "AI service is temporarily busy due to high demand. Please wait a moment and try again."
+    if "too large" in msg or "413" in msg or "token" in msg or "length" in msg:
+        return 413, "Your audio response is too long for the AI to process. Please try with a shorter recording."
+    if "model" in msg and ("not found" in msg or "does not exist" in msg or "access" in msg):
+        return 503, "AI service is currently unavailable. Please try again in a few minutes."
+    if "timeout" in msg or "deadline" in msg or "connection" in msg:
+        return 503, "AI service is taking too long to respond. Please try again."
+    logger.exception("Evaluation failed for exam=%s error=%s", exam_id, str(e)[:500])
+    return 503, "Evaluation failed. Please try again."
+
+
 def _filter_speaking_criteria(criteria: dict, is_visible: bool) -> dict:
     """Free tier: return main 4 criteria with scores and comments. Premium: all criteria."""
     if is_visible:
@@ -250,13 +264,11 @@ async def evaluate_speaking_endpoint(
             detail="Our AI agent is currently experiencing high demand. Please try again later.",
         )
     except Exception as e:
-        logger.exception("Evaluation failed for exam=%s user=%s tier=%s eval_source=%s provider=%s error=%s",
-                         exam.id, user_id, plan_info.get("tier"), plan_info.get("eval_source"),
-                         provider.provider_name, str(e)[:500])
         exam.status = "pending"
         exam.error_message = str(e)[:500]
         db.commit()
-        raise HTTPException(status_code=503, detail="Our AI agent is currently experiencing high demand. Please try again later.")
+        status_code, detail = _get_user_friendly_error(e, str(exam.id))
+        raise HTTPException(status_code=status_code, detail=detail)
 
 
 @router.post("/{exam_id}/retry", response_model=EvaluationResponse)
@@ -404,12 +416,11 @@ async def retry_speaking_evaluation(
         db.commit()
         raise HTTPException(status_code=404, detail="Audio no longer available for this exam.")
     except Exception as e:
-        logger.exception("Retry evaluation failed for exam=%s user=%s provider=%s error=%s",
-                         exam.id, user_id, provider.provider_name, str(e)[:500])
         exam.status = "pending"
         exam.error_message = str(e)[:500]
         db.commit()
-        raise HTTPException(status_code=503, detail="Evaluation failed. Please try again later.")
+        status_code, detail = _get_user_friendly_error(e, str(exam.id))
+        raise HTTPException(status_code=status_code, detail=detail)
 
 
 @router.get("/{exam_id}/evaluation", response_model=EvaluationResponse)

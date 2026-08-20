@@ -78,8 +78,8 @@ class GroqProvider(OpenAIProvider):
         text = sanitize_for_ai(text)
         is_premium = detailed
         task_label = "Task 1 (Report/Letter)" if task_type == "task1" else "Task 2 (Essay)"
-        base_prompt = WRITING_PREMIUM if is_premium else WRITING_OPENAI
-        max_tokens = 8192 if is_premium else 4096
+        base_prompt = WRITING_OPENAI
+        max_tokens = 6000
 
         user_content = f"IELTS Writing {task_label}\n\nEssay ({len(text.split())} words):\n{text}"
         if prompt_text:
@@ -128,7 +128,7 @@ class GroqProvider(OpenAIProvider):
                     + base_prompt
                     + "\n\nFIX YOUR MISTAKE: ALL required criteria_scores keys must be present."
                 )
-                max_tokens = min(max_tokens * 2, 16384)
+                max_tokens = min(max_tokens, 6000)
 
             except Exception as e:
                 last_error = e

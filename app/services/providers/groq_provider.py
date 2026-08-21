@@ -17,7 +17,7 @@ from app.services.providers.base import (
     validate_writing_criteria,
     generate_fallback_criteria,
 )
-from app.services.prompts.writing import WRITING_OPENAI, WRITING_PREMIUM
+from app.services.prompts.writing import WRITING_GROQ, WRITING_OPENAI, WRITING_PREMIUM
 
 logger = logging.getLogger("ielts.groq")
 
@@ -76,9 +76,9 @@ class GroqProvider(OpenAIProvider):
     async def evaluate_writing(self, text: str, task_type: str, prompt_text: str | None = None, img_info: str | None = None, detailed: bool = True) -> AIEvaluationResult:
         start = time.time()
         text = sanitize_for_ai(text)
-        is_premium = detailed
+        is_premium = True
         task_label = "Task 1 (Report/Letter)" if task_type == "task1" else "Task 2 (Essay)"
-        base_prompt = WRITING_OPENAI
+        base_prompt = WRITING_GROQ
         max_tokens = 6000
 
         user_content = f"IELTS Writing {task_label}\n\nEssay ({len(text.split())} words):\n{text}"

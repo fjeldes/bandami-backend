@@ -173,6 +173,55 @@ REMEMBER: ALL 12 criteria_scores keys are REQUIRED. Missing keys = rejected resp
 paragraph_feedback must cover every paragraph. Limit grammar_corrections to the 8 most important errors only.
 Be strict and objective."""
 
+WRITING_GROQ = """You are an IELTS examiner. Evaluate this writing response.
+
+Task types:
+- Task 1 Academic (chart/graph): Report key features, overview, data description
+- Task 1 General Training (letter): Tone, format, bullet points
+- Task 2 (essay): Thesis, arguments, evidence, conclusion
+
+Evaluate ALL 12 criteria below. Provide short 1-sentence comments only.
+
+MAIN (4):
+1. task_response: How well task is addressed, thesis clarity
+2. coherence_and_cohesion: Organization, paragraphs, linking
+3. lexical_resource: Vocabulary range, collocations
+4. grammatical_range_and_accuracy: Sentence variety, errors
+
+SUB (8):
+5. task_fulfillment: Word count coverage (Task 1=150min, Task 2=250min)
+6. position_clarity: Thesis/purpose clarity
+7. paragraph_structure: Topic sentences, logical order
+8. cohesion_devices: Linking words, referencing
+9. vocabulary_range: Less common words, idioms
+10. vocabulary_precision: Word choice accuracy
+11. grammar_range: Simple/compound/complex structures
+12. grammar_accuracy: Error frequency, tense control
+
+Return ONLY valid JSON:
+{
+  "overall_band": 6.5,
+  "criteria_scores": {
+    "task_response": {"score": 6.5, "comment": "..."},
+    "coherence_and_cohesion": {"score": 6.5, "comment": "..."},
+    "lexical_resource": {"score": 7.0, "comment": "..."},
+    "grammatical_range_and_accuracy": {"score": 6.0, "comment": "..."},
+    "task_fulfillment": {"score": 6.5, "comment": "..."},
+    "position_clarity": {"score": 6.5, "comment": "..."},
+    "paragraph_structure": {"score": 6.5, "comment": "..."},
+    "cohesion_devices": {"score": 6.0, "comment": "..."},
+    "vocabulary_range": {"score": 7.0, "comment": "..."},
+    "vocabulary_precision": {"score": 6.5, "comment": "..."},
+    "grammar_range": {"score": 6.0, "comment": "..."},
+    "grammar_accuracy": {"score": 6.0, "comment": "..."}
+  },
+  "general_feedback": "...",
+  "grammar_corrections": [{"original": "...", "corrected": "...", "explanation": "..."}]
+}
+general_feedback: 2-3 sentences overall. No specifics.
+grammar_corrections: Max 3 most critical errors only.
+Be strict. All 12 keys REQUIRED."""
+
 WRITING_UPGRADE = """You are an expert IELTS writing coach. Your task is to REWRITE the student's essay/letter/report at a higher CEFR level while preserving the original ideas, structure, and intent.
 
 The student currently writes at approximately __CURRENT_CEFR__ level (IELTS Band __CURRENT_BAND__). 
